@@ -1,6 +1,7 @@
 import {
   confirmOrder,
   createOrder,
+  getDeliverySlots,
   getOrderById,
   getOrders,
   getTracking,
@@ -11,6 +12,7 @@ import {
 import { requireAuth, requireRole } from "../middleware/auth.js";
 
 export default async function orderRoutes(fastify) {
+  fastify.get("/delivery-slots", getDeliverySlots);
   fastify.get("/orders", { preValidation: [requireRole("Customer", "Buddy", "Admin")] }, getOrders);
   fastify.post("/orders/create", { preValidation: [requireRole("Customer")] }, createOrder);
   fastify.get("/orders/:id", { preValidation: [requireRole("Customer", "Buddy", "Admin")] }, getOrderById);

@@ -1,10 +1,10 @@
-import { ArrowLeft, ArrowRight, Check, MapPin, Minus, Plus, ShoppingBasket, Trash2 } from 'lucide-react'
+import { ArrowLeft, ArrowRight, Check, Clock3, MapPin, Minus, Plus, ShoppingBasket, Trash2 } from 'lucide-react'
 import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react'
 import { Link, Navigate, useNavigate } from 'react-router-dom'
 import { EmptyState, LocationDialog } from '../components/StorefrontParts'
-import { ApiError, api, formatApiError } from '../services/api'
+import { ApiError, api, formatApiError, formatSlotDay } from '../services/api'
 import { useAuth, useCart, useDeliveryLocation } from '../state/AppState'
-import type { DeliveryLocation } from '../types'
+import type { DeliveryLocation, DeliverySlot, DeliveryTiming } from '../types'
 
 interface CheckoutAttempt {
   signature: string
@@ -37,6 +37,12 @@ export function Checkout() {
   const [checkingInventory, setCheckingInventory] = useState(false)
   const [inventoryRefreshKey, setInventoryRefreshKey] = useState(0)
   const [busy, setBusy] = useState(false)
+  const [timing, setTiming] = useState<DeliveryTiming>('NOW')
+  const [slots, setSlots] = useState<DeliverySlot[]>([])
+  const [slotId, setSlotId] = useState('')
+  const [slotsLoading, setSlotsLoading] = useState(false)
+  const [slotsError, setSlotsError] = useState('')
+  const [slotsRefreshKey, setSlotsRefreshKey] = useState(0)
   const sending = useRef(false)
   const mode = cart.state.mode
   const lines = mode === 'ufd' ? cart.state.ufd : cart.state.normal
@@ -123,6 +129,23 @@ export function Checkout() {
     return () => { active = false }
   }, [basketSignature, inventoryRefreshKey, loading, mode, refreshProducts, role, user])
 
+  useEffect(() => {
+    if (timing !== 'SCHEDULED') return
+    let active = true
+    setSlotsLoading(true)
+    setSlotsError('')
+    void api.deliverySlots()
+      .then((next) => {
+        if (!active) return
+        setSlots(next)
+        setSlotId((current) => next.some((slot) => slot.id === current) ? current : '')
+        if (!next.length) setSlotsError('No delivery slots are open right now. Choose “As soon as possible” or try again later.')
+      })
+      .catch((reason: unknown) => { if (active) setSlotsError(`We couldn’t load delivery slots. ${formatApiError(reason)}`) })
+      .finally(() => { if (active) setSlotsLoading(false) })
+    return () => { active = false }
+  }, [slotsRefreshKey, timing])
+
   if (loading) return <div className="page-loading" role="status">Restoring your account…</div>
   if (role === 'buddy') return <Navigate to="/buddy" replace />
   if (!lines.length) return <section className="page-wrap shell"><EmptyState icon={<ShoppingBasket size={25} />} title="Your basket is taking a breather" message="Add some fresh finds before heading to checkout." action={<Link className="button button--gold" to="/">Explore the catalogue <ArrowRight size={16} /></Link>} /></section>
@@ -154,6 +177,10 @@ export function Checkout() {
       setError(inventoryError || 'Please wait while we check the selected Buddy’s current stock.')
       return
     }
+    if (timing === 'SCHEDULED' && !slotId) {
+      setError('Choose a delivery slot, or switch to “As soon as possible”.')
+      return
+    }
     sending.current = true
     setBusy(true)
     setError('')
@@ -163,6 +190,7 @@ export function Checkout() {
       address: deliveryAddress.trim(),
       buddyId: mode === 'ufd' ? cart.state.ufdBuddyId : undefined,
       location: location ? [location.latitude, location.longitude] : undefined,
+      slot: timing === 'SCHEDULED' ? slotId : undefined,
     })
     try {
       const order = await api.createOrder({
@@ -170,6 +198,7 @@ export function Checkout() {
         items: lines.map((line) => ({ productId: line.product.id, quantity: line.quantity })),
         deliveryLocation: { latitude: location.latitude, longitude: location.longitude, address: deliveryAddress.trim() },
         ...(mode === 'ufd' && cart.state.ufdBuddyId ? { selectedBuddyId: cart.state.ufdBuddyId } : {}),
+        ...(timing === 'SCHEDULED' ? { deliveryMode: 'SCHEDULED' as const, scheduledSlotId: slotId } : {}),
         idempotencyKey: idempotencyKey(signature),
       })
       sessionStorage.removeItem('buddyyaa-checkout-attempt')
@@ -180,6 +209,7 @@ export function Checkout() {
         ? 'Stock or delivery availability changed before checkout. Review your basket and try again.'
         : formatApiError(reason)
       setError(errorMessage)
+      if (timing === 'SCHEDULED' && reason instanceof ApiError && reason.status === 400) setSlotsRefreshKey((value) => value + 1)
     } finally {
       sending.current = false
       setBusy(false)
@@ -212,10 +242,15 @@ export function Checkout() {
             {location ? <small>Delivery coordinates are sent securely to Buddyyaa for fulfillment selection.</small> : <small>Choose a delivery location before placing your order.</small>}
           </div>
           <form onSubmit={(event) => void placeOrder(event)}>
+            <fieldset className="delivery-timing"><legend><Clock3 size={16} /> Delivery time</legend>
+              <label className="delivery-timing__option"><input type="radio" name="delivery-timing" checked={timing === 'NOW'} onChange={() => setTiming('NOW')} /> As soon as possible</label>
+              <label className="delivery-timing__option"><input type="radio" name="delivery-timing" checked={timing === 'SCHEDULED'} onChange={() => setTiming('SCHEDULED')} /> Schedule for later</label>
+              {timing === 'SCHEDULED' && (slotsError ? <p className="form-error" role="alert">{slotsError}</p> : <label className="form-label">Delivery slot<select disabled={slotsLoading} onChange={(event) => setSlotId(event.target.value)} value={slotId}><option value="">{slotsLoading ? 'Loading slots…' : 'Choose a slot'}</option>{slots.map((slot) => <option key={slot.id} value={slot.id}>{formatSlotDay(slot.start)} · {slot.label}</option>)}</select></label>)}
+            </fieldset>
             <label className="form-label">Delivery address<textarea onChange={(event) => setAddress(event.target.value)} placeholder="House number, street, neighborhood" rows={3} value={deliveryAddress} /></label>
             {error && <p className="form-error form-error--box" role="alert">{error}</p>}
             <div className="summary-totals"><div><span>Items subtotal (estimate)</span><strong>₹{subtotalEstimate.toFixed(2)}</strong></div><small>Buddyyaa validates stock, delivery charges and the final total when you place the order.</small><div className="summary-estimate"><span>Final order total</span><strong>Confirmed by Buddyyaa</strong></div></div>
-            <button className="button button--gold button--wide checkout-submit" disabled={busy || checkingInventory || Boolean(inventoryError) || !deliveryAddress.trim() || !location} type="submit">{busy ? 'Confirming with Buddyyaa…' : checkingInventory ? 'Checking Buddy stock…' : 'Place order'} <ArrowRight size={17} /></button>
+            <button className="button button--gold button--wide checkout-submit" disabled={busy || checkingInventory || Boolean(inventoryError) || !deliveryAddress.trim() || !location || (timing === 'SCHEDULED' && !slotId)} type="submit">{busy ? 'Confirming with Buddyyaa…' : checkingInventory ? 'Checking Buddy stock…' : 'Place order'} <ArrowRight size={17} /></button>
           </form>
           <p className="checkout-trust">No payment is collected by this page. You’ll see the genuine order confirmation returned by Buddyyaa.</p>
         </aside>

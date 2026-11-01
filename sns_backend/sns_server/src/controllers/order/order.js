@@ -12,6 +12,7 @@ import {
   releaseInventoryReservation,
 } from "../../services/fulfillment.js";
 import { getPlatformTakeRatePercent } from "../../config/config.js";
+import { allBookableSlots, bookableSlots, DELIVERY_TIME_ZONE, findBookableSlot } from "../../services/delivery-slots.js";
 import { assignOrderToBuddy } from "../../services/order-assignment.js";
 import { OrderLifecycleError, transitionOrder } from "../../services/order-lifecycle.js";
 
@@ -68,6 +69,17 @@ function normalizeCheckout(body = {}, headerIdempotencyKey) {
     if (!Number.isSafeInteger(total)) return { error: "Requested product quantity is too large." };
     quantities.set(id, total);
   }
+  const deliveryMode = body.deliveryMode ?? "NOW";
+  if (!["NOW", "SCHEDULED"].includes(deliveryMode)) {
+    return { error: "deliveryMode must be NOW or SCHEDULED." };
+  }
+  if (deliveryMode === "NOW" && body.scheduledSlotId !== undefined) {
+    return { error: "NOW delivery does not accept a scheduledSlotId." };
+  }
+  const slot = deliveryMode === "SCHEDULED" ? findBookableSlot(body.scheduledSlotId) : null;
+  if (deliveryMode === "SCHEDULED" && !slot) {
+    return { error: "That delivery slot is no longer available. Choose another slot." };
+  }
   const selectedBuddyId = body.selectedBuddyId;
   if (deliveryType === "UFD" && !mongoose.isValidObjectId(selectedBuddyId)) {
     return { error: "UFD requires the selectedBuddyId returned by the UFD catalogue." };
@@ -82,6 +94,9 @@ function normalizeCheckout(body = {}, headerIdempotencyKey) {
   const items = [...quantities].map(([productId, quantity]) => ({ productId, quantity }));
   const checkout = {
     deliveryType,
+    deliveryMode,
+    scheduledSlotId: slot?.id,
+    scheduledWindow: slot ? { start: slot.start, end: slot.end } : undefined,
     selectedBuddyId: deliveryType === "UFD" ? String(selectedBuddyId) : undefined,
     items,
     deliveryLocation: {
@@ -93,6 +108,7 @@ function normalizeCheckout(body = {}, headerIdempotencyKey) {
   };
   checkout.fingerprint = createHash("sha256").update(JSON.stringify({
     deliveryType: checkout.deliveryType,
+    scheduledSlotId: checkout.scheduledSlotId,
     selectedBuddyId: checkout.selectedBuddyId ?? null,
     items: [...checkout.items].sort((a, b) => a.productId.localeCompare(b.productId)),
     deliveryLocation: checkout.deliveryLocation,
@@ -198,6 +214,8 @@ export const createOrder = async (request, reply) => {
         customer: request.user.id,
         buddy: candidates[0].buddy._id,
         deliveryType: checkout.deliveryType,
+        deliveryMode: checkout.deliveryMode,
+        scheduledWindow: checkout.scheduledWindow,
         items: snapshotItems,
         deliveryLocation: checkout.deliveryLocation,
         pickupLocation: {
@@ -279,6 +297,13 @@ export const createOrder = async (request, reply) => {
     request.log.error(error);
     return reply.code(500).send({ message: "Unable to create this order right now." });
   }
+};
+
+export const getDeliverySlots = async (request, reply) => {
+  const { date } = request.query;
+  const slots = date === undefined ? allBookableSlots() : bookableSlots(date);
+  if (!slots) return reply.code(400).send({ message: "date must be a calendar date in YYYY-MM-DD form." });
+  return reply.send({ timeZone: DELIVERY_TIME_ZONE, slots });
 };
 
 export const getOrders = async (request, reply) => {

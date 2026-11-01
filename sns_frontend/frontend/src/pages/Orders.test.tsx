@@ -64,6 +64,26 @@ describe('paginated order lists', () => {
     expect(screen.queryByRole('button', { name: 'Load more' })).not.toBeInTheDocument()
   })
 
+  it('shows the scheduled delivery window on the customer order card and the Buddy portal row', async () => {
+    const scheduled = { ...order(4), deliveryMode: 'SCHEDULED', scheduledWindow: { start: '2026-11-03T10:30:00.000Z', end: '2026-11-03T13:30:00.000Z' } }
+    const page = { orders: [scheduled, order(1)], pageInfo: { hasMore: false, nextCursor: null } }
+    vi.stubGlobal('fetch', vi.fn((input: RequestInfo | URL) => Promise.resolve(json(String(input).includes('/buddies/me/inventory') ? { inventory: [] } : page))))
+
+    auth.current = { role: 'customer', user: { id: 'customer-1', name: 'Jane Customer' }, loading: false }
+    const customerView = render(<MemoryRouter><OrderHistory /></MemoryRouter>)
+    expect(await screen.findByText('ORDER · ORDR00004')).toBeInTheDocument()
+    const customerSlot = screen.getByText(/Scheduled/)
+    expect(customerSlot).toHaveTextContent(/Tue, 3 Nov/)
+    expect(customerSlot).toHaveTextContent(/4:00\s?pm.*7:00\s?pm/i)
+    expect(screen.getAllByText(/Scheduled/)).toHaveLength(1)
+    customerView.unmount()
+
+    auth.current = { role: 'buddy', user: { id: 'buddy-1', name: 'Asha' }, loading: false }
+    render(<MemoryRouter><BuddyDashboard /></MemoryRouter>)
+    expect(await screen.findByText('ORDER · ORDR00004')).toBeInTheDocument()
+    expect(screen.getByText(/Deliver Tue, 3 Nov/)).toHaveTextContent(/4:00\s?pm.*7:00\s?pm/i)
+  })
+
   it('shows Load more on the Buddy portal and appends the next page', async () => {
     auth.current = { role: 'buddy', user: { id: 'buddy-1', name: 'Asha' }, loading: false }
     const fetchMock = stubOrderPages()

@@ -3,6 +3,9 @@ import type {
   BuddyInventoryItem,
   Category,
   Coordinates,
+  DeliverySlot,
+  DeliveryTiming,
+  DeliveryWindow,
   Order,
   Product,
   UfdCatalogue,
@@ -168,6 +171,9 @@ export function normalizeOrder(value: unknown): Order {
   const orderItems = Array.isArray(item.items) ? item.items : Array.isArray(item.products) ? item.products : []
   const history = item.statusHistory ?? item.history
   const status = firstString(item.status, item.orderStatus) ?? 'unknown'
+  const window = record(item.scheduledWindow)
+  const windowStart = firstString(window.start)
+  const windowEnd = firstString(window.end)
   const buddyTransitions: Record<string, string[]> = {
     pending: ['cancelled'],
     confirmed: ['preparing', 'cancelled'],
@@ -212,7 +218,20 @@ export function normalizeOrder(value: unknown): Order {
         }
       }).filter((entry) => entry.status)
       : undefined,
+    deliveryTiming: item.deliveryMode === 'SCHEDULED' ? 'SCHEDULED' : 'NOW',
+    scheduledWindow: windowStart && windowEnd ? { start: windowStart, end: windowEnd } : undefined,
   }
+}
+
+const DELIVERY_TIME_ZONE = 'Asia/Kolkata'
+
+export function formatSlotDay(value: string) {
+  return new Date(value).toLocaleDateString('en-IN', { weekday: 'short', day: 'numeric', month: 'short', timeZone: DELIVERY_TIME_ZONE })
+}
+
+export function formatDeliveryWindow(window: DeliveryWindow) {
+  const time = (value: string) => new Date(value).toLocaleTimeString('en-IN', { hour: 'numeric', minute: '2-digit', timeZone: DELIVERY_TIME_ZONE })
+  return `${formatSlotDay(window.start)} · ${time(window.start)} – ${time(window.end)}`
 }
 
 function apiUrl(path: string) {
@@ -404,6 +423,8 @@ export const api = {
     items: Array<{ productId: string; quantity: number }>
     deliveryLocation: Coordinates & { address: string }
     selectedBuddyId?: string
+    deliveryMode?: DeliveryTiming
+    scheduledSlotId?: string
     idempotencyKey: string
   }) {
     const body = await request<unknown>('/orders/create', {
@@ -413,6 +434,7 @@ export const api = {
         items: input.items,
         deliveryLocation: input.deliveryLocation,
         ...(input.deliveryType === 'UFD' && input.selectedBuddyId ? { selectedBuddyId: input.selectedBuddyId } : {}),
+        ...(input.deliveryMode === 'SCHEDULED' ? { deliveryMode: 'SCHEDULED', scheduledSlotId: input.scheduledSlotId } : {}),
         idempotencyKey: input.idempotencyKey,
       }),
     })
@@ -429,6 +451,21 @@ export const api = {
     const pageInfo = record(record(unwrap(body)).pageInfo)
     const nextCursor = pageInfo.hasMore === true ? firstString(pageInfo.nextCursor) ?? null : null
     return { orders: normalizedList(body, normalizeOrder), nextCursor }
+  },
+
+  async deliverySlots(): Promise<DeliverySlot[]> {
+    const body = record(unwrap(await request<unknown>('/delivery-slots')))
+    const slots = Array.isArray(body.slots) ? body.slots : []
+    return slots.map((value) => {
+      const slot = record(value)
+      return {
+        id: firstString(slot.id) ?? '',
+        date: firstString(slot.date) ?? '',
+        label: firstString(slot.label) ?? '',
+        start: firstString(slot.start) ?? '',
+        end: firstString(slot.end) ?? '',
+      }
+    }).filter((slot) => slot.id && slot.start && slot.end)
   },
 
   async buddyInventory() {

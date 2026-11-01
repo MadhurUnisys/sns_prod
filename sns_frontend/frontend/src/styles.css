@@ -779,3 +779,8 @@
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { scroll-behavior: auto !important; animation-duration: .01ms !important; animation-iteration-count: 1 !important; transition-duration: .01ms !important; }
 }
+
+.delivery-timing { display: grid; gap: 8px; margin: 0 0 15px; border: 1px solid #ecebe3; padding: 12px; border-radius: 11px; background: #faf9f4; }
+.delivery-timing legend { display: flex; align-items: center; gap: 6px; padding: 0 4px; color: #2f3b2f; font-size: 12px; font-weight: 700; }
+.delivery-timing__option { display: flex; align-items: center; gap: 8px; color: #425148; font-size: 12px; }
+.buddy-order-row__slot { display: flex; align-items: center; gap: 4px; color: #8a6d1f; font-size: 9px; font-weight: 700; }

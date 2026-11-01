@@ -49,6 +49,7 @@ All settings below are optional environment variables. `.env.example` does not l
 | `AUTH_RATE_LIMIT_WINDOW_MS` | `900000` (15 min) | Auth attempt window |
 | `DELIVERY_LOCATION_MIN_INTERVAL_MS` | `5000` | Minimum gap between accepted `delivery:location` socket pings per socket |
 | `PLATFORM_TAKE_RATE_PERCENT` | `12` | Platform take rate (0–100) snapshotted onto each new order as `takeRatePercent` and `commissionAmount`. Changing it never alters existing orders. |
+| `DELIVERY_SLOT_DAYS_AHEAD` | `2` | How many days after today customers may book a scheduled delivery slot (0–30). The windows themselves are defined in `src/services/delivery-slots.js`. |
 | `TRUST_PROXY` | unset (off) | Proxies whose `X-Forwarded-For` is trusted for the client IP: a comma-separated IP/CIDR list (preferred), a hop count such as `1`, or `true` (trusts any sender and is spoofable) |
 
 Logging is on in every environment and logs one line per request (method, URL, status, timing). The logger redacts `authorization` and `cookie` request headers and `password` and `refreshToken` body fields. Fastify's default request serializer does not log headers or bodies at all, so this redaction only protects against a future serializer change. It does not protect values logged under other keys. There is still no error tracking service.

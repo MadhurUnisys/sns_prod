@@ -72,12 +72,13 @@ Use a separate browser window (or a private window) for the Buddy, so the custom
 9. **Delivered.** The Buddy taps **Delivered**. In Khan's **Inventory** panel, Tomato has gone from 30 to 28: stock moved exactly once.
 10. **Admin view.** Open http://localhost:3000/admin with the admin login: Orders, Buddies and Buddy inventory are all there. Opening an order shows Buddyyaa's take rate (12% by default) and its commission, e.g. ₹14.64 on the ₹122 order. Customers and Buddies never see these figures.
 
+**Optional: scheduling.** At checkout choose **Schedule for later** and pick a window such as tomorrow 7:00 – 9:00 AM. The order card and the Buddy's order list then show when to deliver. Stock is held from the moment the order is placed.
+
 Run `npm run demo:reset` again before the next audience.
 
 ## 6. What is NOT built — do not promise these
 
 - **No payments.** The order total is calculated but nothing is charged, and there is no cash-on-delivery tracking.
-- **No scheduled delivery slots.** Every order is "deliver now".
 - **No push, SMS or WhatsApp notifications.** Updates appear only while the page is open.
 - **No OTP sign-up or real customer login.** The phone login above is a development shortcut that is disabled in production.
 - **No earnings reports, settlement or payouts.** Each order records Buddyyaa's commission, but nothing totals it, invoices it or pays vendors.

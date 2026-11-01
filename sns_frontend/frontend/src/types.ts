@@ -1,5 +1,6 @@
 export type AccountRole = 'customer' | 'buddy'
 export type DeliveryMode = 'normal' | 'ufd'
+export type DeliveryTiming = 'NOW' | 'SCHEDULED'
 
 export interface Coordinates {
   latitude: number
@@ -68,6 +69,19 @@ export interface Order {
   buddyLocation?: Coordinates
   allowedStatuses?: string[]
   statusHistory?: Array<{ status: string; createdAt?: string }>
+  deliveryTiming?: DeliveryTiming
+  scheduledWindow?: DeliveryWindow
+}
+
+export interface DeliveryWindow {
+  start: string
+  end: string
+}
+
+export interface DeliverySlot extends DeliveryWindow {
+  id: string
+  date: string
+  label: string
 }
 
 export interface UfdCatalogue {

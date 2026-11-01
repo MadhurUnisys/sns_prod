@@ -1221,3 +1221,98 @@ test("AdminJS order list and detail show the commission", async () => {
   assert.equal(show.statusCode, 200);
   assert.equal(show.json().record.params.commissionAmount, 5.4);
 });
+
+const { bookableSlots, findBookableSlot, localDate } = await import("../src/services/delivery-slots.js");
+const istDate = (offsetDays) => localDate(new Date(Date.now() + offsetDays * 86_400_000));
+
+test("delivery slots exclude past windows and stay within the booking horizon", () => {
+  const now = new Date("2026-11-02T05:00:00.000Z"); // 10:30 IST
+  const today = bookableSlots("2026-11-02", now);
+  assert.deepEqual(today.map((slot) => slot.id), ["2026-11-02_1600-1900", "2026-11-02_1900-2100"]);
+  assert.equal(today[0].start.toISOString(), "2026-11-02T10:30:00.000Z");
+  assert.equal(today[0].end.toISOString(), "2026-11-02T13:30:00.000Z");
+  assert.equal(bookableSlots("2026-11-03", now).length, 4);
+  assert.equal(bookableSlots("2026-11-04", now).length, 4);
+  assert.deepEqual(bookableSlots("2026-11-05", now), []);
+  assert.deepEqual(bookableSlots("2026-11-01", now), []);
+  assert.equal(bookableSlots("2026-13-01", now), null);
+  assert.equal(findBookableSlot("2026-11-02_0900-1200", now), null);
+  assert.equal(findBookableSlot("2026-11-02_1600-1900", now).id, "2026-11-02_1600-1900");
+  assert.equal(findBookableSlot("2026-11-03_0800-0900", now), null);
+});
+
+test("GET /delivery-slots lists bookable windows", async () => {
+  const tomorrow = istDate(1);
+  const dated = await app.inject({ method: "GET", url: `/delivery-slots?date=${tomorrow}` });
+  assert.equal(dated.statusCode, 200);
+  assert.equal(dated.json().timeZone, "Asia/Kolkata");
+  assert.deepEqual(dated.json().slots.map((slot) => slot.id), [
+    `${tomorrow}_0700-0900`, `${tomorrow}_0900-1200`, `${tomorrow}_1600-1900`, `${tomorrow}_1900-2100`,
+  ]);
+  assert.ok(dated.json().slots.every((slot) => slot.label && slot.start && slot.end && slot.date === tomorrow));
+  const all = await app.inject({ method: "GET", url: "/delivery-slots" });
+  assert.equal(all.statusCode, 200);
+  assert.ok(all.json().slots.length >= 8);
+  assert.equal((await app.inject({ method: "GET", url: `/delivery-slots?date=${istDate(-1)}` })).json().slots.length, 0);
+  assert.equal((await app.inject({ method: "GET", url: "/delivery-slots?date=tomorrow" })).statusCode, 400);
+});
+
+test("booking a past or unknown delivery slot is rejected", async () => {
+  const before = await Inventory.findOne({ buddy: fixture.nearBuddy._id, product: fixture.milk._id }).lean();
+  for (const [payload, label] of [
+    [{ deliveryMode: "SCHEDULED", scheduledSlotId: `${istDate(-1)}_1600-1900` }, "past slot"],
+    [{ deliveryMode: "SCHEDULED", scheduledSlotId: `${istDate(1)}_0300-0400` }, "unknown slot"],
+    [{ deliveryMode: "SCHEDULED", scheduledSlotId: `${istDate(5)}_1600-1900` }, "beyond horizon"],
+    [{ deliveryMode: "SCHEDULED" }, "missing slot"],
+    [{ deliveryMode: "NOW", scheduledSlotId: `${istDate(1)}_1600-1900` }, "slot with NOW"],
+    [{ deliveryMode: "LATER" }, "unknown mode"],
+  ]) {
+    const response = await createOrder(fixture.customer, payload);
+    assert.equal(response.statusCode, 400, label);
+  }
+  assert.equal(await Order.countDocuments(), 0);
+  const after = await Inventory.findOne({ buddy: fixture.nearBuddy._id, product: fixture.milk._id }).lean();
+  assert.deepEqual([after.availableQuantity, after.reservedQuantity], [before.availableQuantity, before.reservedQuantity]);
+});
+
+test("a scheduled order reserves stock identically to an immediate one", async () => {
+  const stock = async () => {
+    const row = await Inventory.findOne({ buddy: fixture.nearBuddy._id, product: fixture.milk._id }).lean();
+    return [row.availableQuantity, row.reservedQuantity];
+  };
+  const items = [{ productId: fixture.milk._id, quantity: 2 }];
+  const start = await stock();
+  const immediate = await createOrder(fixture.customer, { items });
+  assert.equal(immediate.statusCode, 201);
+  assert.equal(immediate.json().order.deliveryMode, "NOW");
+  assert.equal(immediate.json().order.scheduledWindow, undefined);
+  const afterImmediate = await stock();
+
+  const slotId = `${istDate(1)}_1600-1900`;
+  const scheduled = await createOrder(fixture.otherCustomer, { items, deliveryMode: "SCHEDULED", scheduledSlotId: slotId });
+  assert.equal(scheduled.statusCode, 201);
+  const order = scheduled.json().order;
+  assert.equal(order.deliveryMode, "SCHEDULED");
+  assert.equal(order.status, "pending");
+  assert.equal(String(order.buddy._id), String(fixture.nearBuddy._id));
+  const slot = findBookableSlot(slotId);
+  assert.equal(order.scheduledWindow.start, slot.start.toISOString());
+  assert.equal(order.scheduledWindow.end, slot.end.toISOString());
+  const afterScheduled = await stock();
+  assert.deepEqual(
+    [afterScheduled[0] - afterImmediate[0], afterScheduled[1] - afterImmediate[1]],
+    [afterImmediate[0] - start[0], afterImmediate[1] - start[1]]
+  );
+  const stored = await Order.findById(order._id).lean();
+  assert.equal(stored.inventoryState, "reserved");
+
+  const ufdScheduled = await createOrder(fixture.customer, {
+    deliveryType: "UFD",
+    selectedBuddyId: fixture.nearBuddy._id,
+    items: [{ productId: fixture.bread._id, quantity: 1 }],
+    deliveryMode: "SCHEDULED",
+    scheduledSlotId: `${istDate(2)}_0700-0900`,
+  });
+  assert.equal(ufdScheduled.statusCode, 201);
+  assert.equal(ufdScheduled.json().order.deliveryMode, "SCHEDULED");
+});

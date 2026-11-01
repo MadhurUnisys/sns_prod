@@ -14,7 +14,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { Link, Navigate, useParams } from 'react-router-dom'
 import { EmptyState } from '../components/StorefrontParts'
 import { MapPreview } from '../components/MapPreview'
-import { api, formatApiError } from '../services/api'
+import { api, formatApiError, formatDeliveryWindow } from '../services/api'
 import { createBuddyRealtime, createOrderRealtime } from '../services/realtime'
 import { useAuth } from '../state/AppState'
 import type { BuddyInventoryItem, Coordinates, Order } from '../types'
@@ -208,7 +208,7 @@ function BuddyOrderRow({ order }: { order: Order }) {
   const totalItems = order.items.reduce((sum, item) => sum + item.quantity, 0)
   return <article className="buddy-order-row">
     <div className="buddy-order-row__icon"><PackageCheck size={19} /></div>
-    <div className="buddy-order-row__main"><span className="order-ref">ORDER · {order.orderNumber ?? order.id}</span><strong>{totalItems} items · {order.items.slice(0, 2).map((item) => item.name).join(', ')}{order.items.length > 2 ? ` +${order.items.length - 2} more` : ''}</strong><span>{order.address ?? 'Delivery address available in order details'}</span></div>
+    <div className="buddy-order-row__main"><span className="order-ref">ORDER · {order.orderNumber ?? order.id}</span><strong>{totalItems} items · {order.items.slice(0, 2).map((item) => item.name).join(', ')}{order.items.length > 2 ? ` +${order.items.length - 2} more` : ''}</strong>{order.scheduledWindow && <span className="buddy-order-row__slot"><Clock3 size={13} /> Deliver {formatDeliveryWindow(order.scheduledWindow)}</span>}<span>{order.address ?? 'Delivery address available in order details'}</span></div>
     <span className={`status-pill ${isDelivered(order.status) ? 'status-pill--green' : isCancelled(order.status) ? 'status-pill--muted' : isAwaitingAcceptance(order.status) ? 'status-pill--gold' : 'status-pill--blue'}`}>{friendly(order.status)}</span>
     {order.total !== undefined && <strong className="buddy-order-row__total">₹{order.total.toFixed(2)}</strong>}
     <Link className="buddy-order-row__link" to={`/buddy/orders/${encodeURIComponent(order.id)}`} aria-label={`Open order ${order.id}`}><ArrowRight size={17} /></Link>
@@ -341,7 +341,7 @@ export function BuddyOrderDetail() {
         <div className="buddy-detail-layout">
           <div className="buddy-detail-main">
             <section className="buddy-detail-card"><div className="card-title-row"><PackageCheck size={18} /><h2>Order items</h2></div>{order.items.map((item, index) => <div className="buddy-detail-item" key={`${item.productId}-${index}`}><div>{item.imageUrl ? <img src={item.imageUrl} alt="" /> : <span>🥬</span>}</div><span><strong>{item.name}</strong><small>{item.unit || 'As listed'} · Quantity {item.quantity}</small></span><strong>{item.price !== undefined ? `₹${(item.price * item.quantity).toFixed(2)}` : 'Server price'}</strong></div>)}<div className="buddy-detail-total"><span>Server-confirmed order total</span><strong>{order.total !== undefined ? `₹${order.total.toFixed(2)}` : 'Not returned'}</strong></div></section>
-            <section className="buddy-detail-card"><div className="card-title-row"><MapPin size={18} /><h2>Delivery destination</h2></div><p className="buddy-address">{order.address ?? 'Address details were not returned for this order.'}</p><MapPreview current={order.buddyLocation} destination={order.destination} /></section>
+            <section className="buddy-detail-card"><div className="card-title-row"><MapPin size={18} /><h2>Delivery destination</h2></div><p className="buddy-address">{order.address ?? 'Address details were not returned for this order.'}</p>{order.scheduledWindow && <p className="buddy-address"><Clock3 size={15} /> <strong>Scheduled delivery:</strong> {formatDeliveryWindow(order.scheduledWindow)}</p>}<MapPreview current={order.buddyLocation} destination={order.destination} /></section>
           </div>
           <aside className="buddy-actions-card"><span className="eyebrow">FULFILLMENT ACTIONS</span><h2>Next steps</h2><p>Only status changes allowed by the backend for this order can be selected.</p>
             {canAccept && <button className="button button--gold button--wide" disabled={saving} onClick={() => void acceptOrder()} type="button">{saving ? 'Confirming…' : 'Accept this order'} <Check size={17} /></button>}

@@ -33,6 +33,15 @@ const orderSchema = new mongoose.Schema(
       enum: ["UFD", "NORMAL"],
       default: "NORMAL",
     },
+    deliveryMode: {
+      type: String,
+      enum: ["NOW", "SCHEDULED"],
+      default: "NOW",
+    },
+    scheduledWindow: {
+      start: { type: Date },
+      end: { type: Date },
+    },
     items: [
       {
         product: {

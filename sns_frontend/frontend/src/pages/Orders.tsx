@@ -1,10 +1,10 @@
 import { motion } from 'framer-motion'
-import { ArrowLeft, ArrowRight, CalendarDays, MapPin, PackageCheck, RefreshCw, ShoppingBag } from 'lucide-react'
+import { ArrowLeft, ArrowRight, CalendarDays, Clock3, MapPin, PackageCheck, RefreshCw, ShoppingBag } from 'lucide-react'
 import { useCallback, useEffect, useState, type FormEvent } from 'react'
 import { Link, Navigate, useParams } from 'react-router-dom'
 import { EmptyState, PageHeading } from '../components/StorefrontParts'
 import { MapPreview } from '../components/MapPreview'
-import { api, formatApiError } from '../services/api'
+import { api, formatApiError, formatDeliveryWindow } from '../services/api'
 import { createOrderRealtime } from '../services/realtime'
 import { useAuth } from '../state/AppState'
 import type { Order, User } from '../types'
@@ -83,7 +83,7 @@ function OrderCard({ order }: { order: Order }) {
       <div className="order-card__top"><div><span className="order-ref">ORDER · {order.orderNumber ?? order.id}</span>{order.createdAt && <span className="order-date"><CalendarDays size={13} /> {new Date(order.createdAt).toLocaleString('en-IN', { dateStyle: 'medium', timeStyle: 'short' })}</span>}</div><span className={`status-pill ${statusTone(order.status)}`}>{displayStatus(order.status)}</span></div>
       <div className="order-card__content">
         <div className="order-card__items">{order.items.slice(0, 3).map((item, index) => <span key={`${order.id}-${item.productId}-${index}`}>{item.quantity} × {item.name}</span>)}{order.items.length > 3 && <small>and {order.items.length - 3} more item types</small>}</div>
-        <div className="order-card__delivery">{order.buddy && <span><span className="buddy-avatar">{order.buddy.name.slice(0, 1)}</span> Fulfilled by {order.buddy.name}</span>}{order.address && <span><MapPin size={14} /> {order.address}</span>}</div>
+        <div className="order-card__delivery">{order.buddy && <span><span className="buddy-avatar">{order.buddy.name.slice(0, 1)}</span> Fulfilled by {order.buddy.name}</span>}{order.address && <span><MapPin size={14} /> {order.address}</span>}{order.scheduledWindow && <span><Clock3 size={14} /> Scheduled · {formatDeliveryWindow(order.scheduledWindow)}</span>}</div>
       </div>
       <div className="order-card__bottom"><strong>{order.total !== undefined ? `₹${order.total.toFixed(2)}` : 'Total confirmed by Buddyyaa'}</strong><Link to={`/orders/${encodeURIComponent(order.id)}`}>Track order <ArrowRight size={15} /></Link></div>
     </motion.article>

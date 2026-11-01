@@ -79,6 +79,7 @@ Buddies may update only `availableQuantity` for their own existing active invent
 
 | Method | Path | Authentication | Purpose |
 |---|---|---|---|
+| GET | `/delivery-slots` | Public | Bookable delivery windows; optional `?date=YYYY-MM-DD` (India date). Without a date, returns every bookable slot from today through the booking horizon |
 | POST | `/orders/create` | Customer | Create one UFD or NORMAL order; customer ID comes from token |
 | GET | `/orders` | Customer, Buddy, Admin | List own customer orders, assigned Buddy orders, or all orders for Admin, newest first and paginated; optional valid `?status=`, `?limit=`, `?cursor=` |
 | GET | `/orders/:id` | Customer, assigned Buddy, Admin | Fetch an authorized order |
@@ -102,9 +103,15 @@ Create-order body shape:
     "longitude": 77.59,
     "address": "Delivery address"
   },
-  "idempotencyKey": "optional-client-generated-unique-key"
+  "idempotencyKey": "optional-client-generated-unique-key",
+  "deliveryMode": "SCHEDULED",
+  "scheduledSlotId": "2026-11-03_1600-1900"
 }
 ```
+
+`deliveryMode` is optional and defaults to `NOW` (deliver as soon as possible). For `SCHEDULED`, `scheduledSlotId` must be the `id` of a slot currently returned by `GET /delivery-slots`. The server re-checks that the slot exists, falls within the booking horizon and has not started, and otherwise returns 400. `NOW` orders must not send a `scheduledSlotId`. UFD and NORMAL orders can both be scheduled. Stock is reserved when the order is created, whether it is delivered now or in a later slot, and orders store `deliveryMode` and `scheduledWindow: { start, end }`.
+
+Slots are defined in `src/services/delivery-slots.js` in India Standard Time: 07:00–09:00, 09:00–12:00, 16:00–19:00 and 19:00–21:00. A slot stops being bookable once it starts. `GET /delivery-slots` returns `{ "timeZone": "Asia/Kolkata", "slots": [{ "id", "date", "label", "start", "end" }] }`. `start` and `end` are ISO instants. A date outside today plus `DELIVERY_SLOT_DAYS_AHEAD` days returns an empty list, and a malformed date returns 400.
 
 For NORMAL delivery omit `selectedBuddyId`; the server chooses the nearest active Buddy able to fulfill every requested quantity. The server ignores client prices and snapshots catalogue prices. UFD requires the selected Buddy ID and never switches to another Buddy at checkout. Coordinates must be numeric values within latitude/longitude ranges.
 
