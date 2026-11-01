@@ -32,9 +32,28 @@ Sign in through `/auth/admin/login` to obtain an Admin bearer token, or use the 
 1. Create a Buddy with `POST /api/admin/buddies` (name, phone, email, password of at least 12 characters, address, and location). New accounts are disabled pending approval.
 2. Approve and activate through `PATCH /api/admin/buddies/:id/status` with `{ "isApproved": true, "isActive": true }`, or edit the Buddy in AdminJS.
 3. Add inventory using `PUT /api/admin/inventory` with `{ "buddyId": "...", "productId": "...", "availableQuantity": 12 }`, or the AdminJS “Set Buddy stock” action. Stock is per Buddy/product.
-4. Buddy login is `POST /auth/buddy/login`. Approved Buddies can update their availability and location with `PATCH /buddies/me`, and set available stock for their own existing active products with `PATCH /buddies/me/inventory`. They cannot edit reserved quantities or reservation records.
+4. Buddy login is `POST /auth/buddy/login`. Approved Buddies can update their availability and stall location with `PATCH /buddies/me` (delivery location pings record a separate live position and never move the stall), and set available stock for their own existing active products with `PATCH /buddies/me/inventory`. They cannot edit reserved quantities or reservation records.
 
 The catalogue seed does not create Buddies or assign inventory. Use the Admin panel/API to provision real fulfillment data.
+
+## Logging, rate limits and pagination
+
+All settings below are optional environment variables. `.env.example` does not list them yet.
+
+| Variable | Default | Effect |
+|---|---|---|
+| `LOG_LEVEL` | `info` in production, `debug` otherwise | Fastify/pino log level |
+| `RATE_LIMIT_MAX` / `RATE_LIMIT_WINDOW_MS` | `100` / `60000` | Requests per client IP per window, across the API routes |
+| `AUTH_RATE_LIMIT_MAX` | `5` | Sign-in/refresh attempts per client IP + identifier per auth window |
+| `AUTH_IDENTIFIER_RATE_LIMIT_MAX` | `20` | Sign-in/refresh attempts per identifier across all IPs per auth window |
+| `AUTH_RATE_LIMIT_WINDOW_MS` | `900000` (15 min) | Auth attempt window |
+| `DELIVERY_LOCATION_MIN_INTERVAL_MS` | `5000` | Minimum gap between accepted `delivery:location` socket pings per socket |
+
+Logging is on in every environment and logs one line per request (method, URL, status, timing). The logger redacts `authorization` and `cookie` request headers and `password` and `refreshToken` body fields. Fastify's default request serializer does not log headers or bodies at all, so this redaction only protects against a future serializer change. It does not protect values logged under other keys. There is still no error tracking service.
+
+Rate-limit counters live in memory in each process. They are not shared across instances and reset on restart. The client IP is the TCP peer address (`trustProxy` is off), so behind a reverse proxy every client shares one budget. Enable and configure `trustProxy` before deploying behind one. `/admin/login` (AdminJS) is not rate limited.
+
+`GET /orders` returns at most 25 orders per page (`?limit=` up to 100). Pass the returned `pageInfo.nextCursor` as `?cursor=` for the next page. See [API.md](./API.md) for details.
 
 ## Validation
 

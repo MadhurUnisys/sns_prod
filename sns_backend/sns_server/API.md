@@ -27,6 +27,19 @@ The root path intentionally returns API metadata rather than a customer homepage
 
 Customer phone login is not OTP-backed and is not enabled in production. Admin and Buddy passwords use bcrypt hashes.
 
+## Rate limits
+
+Rejected requests get `429` with a `Retry-After` header (seconds) and `{ "message": "..." }`. The limits apply per server process and are kept in memory, so they are not shared between instances and reset on restart.
+
+- **Every API route** (all routes in this document except `/`, `/health`, `/ready` and AdminJS): 100 requests per minute per client IP. Responses carry `x-ratelimit-limit`, `x-ratelimit-remaining` and `x-ratelimit-reset`.
+- **Sign-in and refresh** (`/auth/login`, `/auth/customer/login`, `/auth/buddy/login`, `/auth/login-delivery-partner`, `/auth/admin/login`, `/auth/refresh`): these routes share one attempt budget, on top of the global limit. Successful attempts count too.
+  - 5 attempts per 15 minutes for each client IP + submitted identifier.
+  - 20 attempts per 15 minutes for each identifier across all IPs.
+  - The identifier is the submitted email, phone or refresh token.
+  - The 429 message is the same whether or not the account exists. A real account can be locked for up to 15 minutes by attempts spread across several IPs.
+
+The client IP is the TCP peer address; `trustProxy` is not enabled. Behind a reverse proxy, every client would share the proxy's IP and therefore one budget.
+
 ## Catalogue
 
 | Method | Path | Authentication | Purpose |
@@ -73,7 +86,7 @@ Buddies may update only `availableQuantity` for their own existing active invent
 | POST | `/orders/confirm` | Assigned Buddy or Admin | Accept a pending assigned order |
 | PATCH | `/orders/:id/status` | Customer, assigned Buddy, Admin | Customer may cancel own pending order; Buddy/Admin use valid lifecycle transitions |
 | POST | `/orders/update-status` | Customer, assigned Buddy, Admin | Compatibility status endpoint; same authorization and lifecycle checks |
-| PATCH | `/orders/:id/location` | Assigned Buddy | Persist live courier position (not the stall location), then emit realtime tracking |
+| PATCH | `/orders/:id/location` | Assigned Buddy | Persist live courier position (not the stall location), then emit realtime tracking; not throttled beyond the global rate limit |
 | PATCH | `/orders/track/location` | Assigned Buddy | Compatibility location endpoint |
 | PATCH | `/api/admin/orders/:id/assign-buddy` | Admin | Reassign a pending order only after reserving the new Buddy's full basket |
 
@@ -124,7 +137,7 @@ Connect to the same origin with a valid access token in `auth.token` or a Bearer
 | Direction | Event | Payload / behavior |
 |---|---|---|
 | Client → server | `order:join` | `{ "orderId": "..." }`; joins only if caller is the customer, assigned Buddy, or Admin |
-| Client → server | `delivery:location` | `{ "orderId": "...", "latitude": 12.9, "longitude": 77.5 }`; assigned Buddy only, persisted before acknowledgement/broadcast; records live courier position only and never changes the stall location used for matching |
+| Client → server | `delivery:location` | `{ "orderId": "...", "latitude": 12.9, "longitude": 77.5 }`; assigned Buddy only, persisted before acknowledgement/broadcast; records live courier position only and never changes the stall location used for matching. At most one ping per 5 seconds per socket is accepted. The acknowledgement is `{ "persisted": true }`, `{ "throttled": true }` (ping dropped, socket stays connected), or `{ "error": "..." }` |
 | Server → room `order:<id>` | `order:status` | Persisted order state after API/admin status transition |
 | Server → room `order:<id>` | `order:assignment` | Updated Buddy assignment after Admin reassignment |
 | Server → room `order:<id>` | `delivery:location` | Persisted delivery-location update |
