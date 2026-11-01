@@ -401,7 +401,7 @@ export const updateBuddyLocation = async (request, reply) => {
     }
     await Buddy.updateOne(
       { _id: request.user.id },
-      { $set: { location: { latitude, longitude }, locationUpdatedAt: new Date() } }
+      { $set: { liveLocation: { latitude, longitude }, liveLocationUpdatedAt: new Date() } }
     );
     const tracking = {
       orderId: order.orderId,

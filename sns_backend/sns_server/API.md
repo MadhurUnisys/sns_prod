@@ -49,7 +49,7 @@ Catalogue endpoints do not imply that every Buddy stocks a product. UFD response
 |---|---|---|---|
 | GET | `/buddies/me/inventory` | Buddy | Fetch own inventory |
 | PATCH | `/buddies/me/inventory` | Buddy | Set available quantity for a product already in own active inventory |
-| PATCH | `/buddies/me` | Buddy | Set own availability, current location, or address |
+| PATCH | `/buddies/me` | Buddy | Set own availability, stall location, or address |
 | GET | `/api/admin/buddies` | Admin | List Buddies without password hashes |
 | POST | `/api/admin/buddies` | Admin | Create a disabled, unapproved Buddy |
 | PATCH | `/api/admin/buddies/:id/status` | Admin | Approve/activate or deactivate a Buddy |
@@ -57,6 +57,8 @@ Catalogue endpoints do not imply that every Buddy stocks a product. UFD response
 | PUT | `/api/admin/inventory` | Admin | Create or set Buddy/product stock |
 
 New Buddies cannot log in or receive orders until approved and active. The unique inventory key is `(buddy, product)`.
+
+A Buddy has two separate positions. `location`, set with `PATCH /buddies/me` (or by an Admin at provisioning), is the stall location: it is used to match orders to Buddies and is copied onto new orders as `pickupLocation`. `liveLocation` is the live courier position. `PATCH /orders/:id/location` and the `delivery:location` Socket.IO event write only `liveLocation` and the order's `deliveryPersonLocation`. They never change `location`, so they never affect matching.
 
 Buddies may update only `availableQuantity` for their own existing active inventory rows with `PATCH /buddies/me/inventory` and `{ "productId": "...", "availableQuantity": 12 }`. They cannot create inventory rows, change another Buddy's stock, or alter reserved quantities or reservation records; administrators provision products and manage inventory activation.
 
@@ -71,7 +73,7 @@ Buddies may update only `availableQuantity` for their own existing active invent
 | POST | `/orders/confirm` | Assigned Buddy or Admin | Accept a pending assigned order |
 | PATCH | `/orders/:id/status` | Customer, assigned Buddy, Admin | Customer may cancel own pending order; Buddy/Admin use valid lifecycle transitions |
 | POST | `/orders/update-status` | Customer, assigned Buddy, Admin | Compatibility status endpoint; same authorization and lifecycle checks |
-| PATCH | `/orders/:id/location` | Assigned Buddy | Persist own delivery location, then emit realtime tracking |
+| PATCH | `/orders/:id/location` | Assigned Buddy | Persist live courier position (not the stall location), then emit realtime tracking |
 | PATCH | `/orders/track/location` | Assigned Buddy | Compatibility location endpoint |
 | PATCH | `/api/admin/orders/:id/assign-buddy` | Admin | Reassign a pending order only after reserving the new Buddy's full basket |
 
@@ -108,7 +110,7 @@ Connect to the same origin with a valid access token in `auth.token` or a Bearer
 | Direction | Event | Payload / behavior |
 |---|---|---|
 | Client → server | `order:join` | `{ "orderId": "..." }`; joins only if caller is the customer, assigned Buddy, or Admin |
-| Client → server | `delivery:location` | `{ "orderId": "...", "latitude": 12.9, "longitude": 77.5 }`; assigned Buddy only, persisted before acknowledgement/broadcast |
+| Client → server | `delivery:location` | `{ "orderId": "...", "latitude": 12.9, "longitude": 77.5 }`; assigned Buddy only, persisted before acknowledgement/broadcast; records live courier position only and never changes the stall location used for matching |
 | Server → room `order:<id>` | `order:status` | Persisted order state after API/admin status transition |
 | Server → room `order:<id>` | `order:assignment` | Updated Buddy assignment after Admin reassignment |
 | Server → room `order:<id>` | `delivery:location` | Persisted delivery-location update |

@@ -83,7 +83,7 @@ export const attachRealtimeHandlers = (io) => {
         if (!order) return acknowledge({ error: "Order is not assigned to this Buddy or is not trackable." });
         await Buddy.updateOne(
           { _id: user.id },
-          { $set: { location: { latitude, longitude }, locationUpdatedAt: new Date() } }
+          { $set: { liveLocation: { latitude, longitude }, liveLocationUpdatedAt: new Date() } }
         );
         const tracking = {
           orderId: String(order._id),

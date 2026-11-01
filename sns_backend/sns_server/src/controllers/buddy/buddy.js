@@ -5,7 +5,7 @@ import { Buddy } from "../../models/user.js";
 import { isValidCoordinates } from "../../services/fulfillment.js";
 import { setBuddyStock, InventoryServiceError } from "../../services/inventory.js";
 
-const publicBuddyFields = "name phone email address location isAvailable isApproved isActive locationUpdatedAt createdAt updatedAt";
+const publicBuddyFields = "name phone email address location isAvailable isApproved isActive locationUpdatedAt liveLocation liveLocationUpdatedAt createdAt updatedAt";
 
 export const getBuddyInventory = async (request, reply) => {
   const isAdmin = request.user.role === "Admin";

@@ -644,6 +644,100 @@ test("Socket.IO authenticates clients, authorizes order rooms, and persists loca
   }
 });
 
+const stall = { latitude: 12.9716, longitude: 77.5946 };
+const fiveKmFromStall = { latitude: 13.0166, longitude: 77.5946 };
+const nearestUfdBuddyAtStall = async () => {
+  const ufd = await app.inject({
+    method: "GET",
+    url: `/products/ufd?latitude=${stall.latitude}&longitude=${stall.longitude}`,
+  });
+  assert.equal(ufd.statusCode, 200);
+  return String(ufd.json().buddy.id);
+};
+
+test("a Buddy's stall location is unchanged by delivery location pings", async () => {
+  const buddy = fixture.nearBuddy;
+  assert.deepEqual((await Buddy.findById(buddy._id).lean()).location, stall);
+  const created = await createOrder(fixture.customer);
+  assert.equal(created.statusCode, 201);
+  const orderId = created.json().order._id;
+  assert.equal(String(created.json().order.buddy._id), String(buddy._id));
+  const accepted = await app.inject({
+    method: "POST",
+    url: "/orders/confirm",
+    headers: auth(buddy),
+    payload: { orderId },
+  });
+  assert.equal(accepted.statusCode, 200);
+  for (const status of ["preparing", "out_for_delivery"]) {
+    const response = await app.inject({
+      method: "PATCH",
+      url: `/orders/${orderId}/status`,
+      headers: auth(buddy),
+      payload: { status },
+    });
+    assert.equal(response.statusCode, 200);
+  }
+
+  const ping = await app.inject({
+    method: "PATCH",
+    url: `/orders/${orderId}/location`,
+    headers: auth(buddy),
+    payload: fiveKmFromStall,
+  });
+  assert.equal(ping.statusCode, 200);
+
+  const saved = await Buddy.findById(buddy._id).lean();
+  assert.deepEqual(saved.location, stall);
+  assert.deepEqual(saved.liveLocation, fiveKmFromStall);
+  assert.ok(saved.liveLocationUpdatedAt instanceof Date);
+  const order = await Order.findById(orderId).lean();
+  assert.deepEqual(order.deliveryPersonLocation, fiveKmFromStall);
+  assert.equal(await nearestUfdBuddyAtStall(), String(buddy._id));
+});
+
+test("a Buddy's stall location is unchanged by Socket.IO delivery location pings", async () => {
+  const buddy = fixture.nearBuddy;
+  const created = await createOrder(fixture.customer);
+  const orderId = created.json().order._id;
+  const accepted = await app.inject({
+    method: "POST",
+    url: "/orders/confirm",
+    headers: auth(buddy),
+    payload: { orderId },
+  });
+  assert.equal(accepted.statusCode, 200);
+
+  const address = app.server.listening
+    ? `http://127.0.0.1:${app.server.address().port}`
+    : await app.listen({ host: "127.0.0.1", port: 0 });
+  const buddySocket = await new Promise((resolve, reject) => {
+    const socket = connectSocket(address, {
+      auth: { token: tokenFor(buddy) },
+      transports: ["websocket"],
+      reconnection: false,
+    });
+    socket.once("connect", () => resolve(socket));
+    socket.once("connect_error", reject);
+  });
+  try {
+    const update = await new Promise((resolve) =>
+      buddySocket.emit("delivery:location", { orderId, ...fiveKmFromStall }, resolve)
+    );
+    assert.equal(update.persisted, true);
+  } finally {
+    buddySocket.disconnect();
+  }
+
+  const saved = await Buddy.findById(buddy._id).lean();
+  assert.deepEqual(saved.location, stall);
+  assert.deepEqual(saved.liveLocation, fiveKmFromStall);
+  assert.ok(saved.liveLocationUpdatedAt instanceof Date);
+  const order = await Order.findById(orderId).lean();
+  assert.deepEqual(order.deliveryPersonLocation, fiveKmFromStall);
+  assert.equal(await nearestUfdBuddyAtStall(), String(buddy._id));
+});
+
 test("admin API and AdminJS require real admin credentials", async () => {
   const forbidden = await app.inject({ method: "GET", url: "/api/admin/buddies" });
   assert.equal(forbidden.statusCode, 401);

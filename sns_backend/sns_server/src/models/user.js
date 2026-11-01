@@ -37,12 +37,18 @@ const buddySchema = new mongoose.Schema(
     isApproved: { type: Boolean, default: false },
     isActive: { type: Boolean, default: false },
     isAvailable: { type: Boolean, default: true },
+    // Stall/pickup location used for order matching. Never write this from a courier location ping.
     location: {
       latitude: { type: Number, min: -90, max: 90 },
       longitude: { type: Number, min: -180, max: 180 },
     },
     address: { type: String, trim: true },
     locationUpdatedAt: { type: Date },
+    liveLocation: {
+      latitude: { type: Number, min: -90, max: 90 },
+      longitude: { type: Number, min: -180, max: 180 },
+    },
+    liveLocationUpdatedAt: { type: Date },
   },
   { timestamps: true }
 );
