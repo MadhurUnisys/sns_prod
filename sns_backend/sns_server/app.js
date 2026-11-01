@@ -1,5 +1,6 @@
 import "dotenv/config";
 import Fastify from "fastify";
+import rateLimit from "@fastify/rate-limit";
 import { Server as SocketIOServer } from "socket.io";
 import { fileURLToPath } from "node:url";
 import { dirname, resolve } from "node:path";
@@ -22,7 +23,23 @@ import { recoverPendingOrderAssignments } from "./src/services/order-assignment.
 
 const currentFile = fileURLToPath(import.meta.url);
 
-export const buildApp = async ({ mongoUri, connectDatabase = true } = {}) => {
+const positiveIntegerFromEnv = (name, fallback) => {
+  const value = Number(process.env[name]);
+  return Number.isSafeInteger(value) && value > 0 ? value : fallback;
+};
+
+export const createLoggerOptions = ({ production = isProductionEnvironment, stream } = {}) => ({
+  level: process.env.LOG_LEVEL || (production ? "info" : "debug"),
+  redact: [
+    "req.headers.authorization",
+    "req.headers.cookie",
+    "req.body.password",
+    "req.body.refreshToken",
+  ],
+  ...(stream ? { stream } : {}),
+});
+
+export const buildApp = async ({ mongoUri, connectDatabase = true, logStream } = {}) => {
   validateRuntimeConfig();
   if (connectDatabase) await connectDB(mongoUri);
   if (getMongoStatus().connected) {
@@ -30,7 +47,7 @@ export const buildApp = async ({ mongoUri, connectDatabase = true } = {}) => {
     await recoverPendingOrderAssignments();
   }
 
-  const app = Fastify({ logger: !isProductionEnvironment });
+  const app = Fastify({ logger: createLoggerOptions({ stream: logStream }) });
   app.decorateRequest("user", null);
 
   app.setErrorHandler((error, request, reply) => {
@@ -106,7 +123,18 @@ export const buildApp = async ({ mongoUri, connectDatabase = true } = {}) => {
   });
 
   await registerAdminPanel(app);
-  app.register(authRoutes);
+  await app.register(rateLimit, {
+    global: true,
+    max: positiveIntegerFromEnv("RATE_LIMIT_MAX", 100),
+    timeWindow: positiveIntegerFromEnv("RATE_LIMIT_WINDOW_MS", 60_000),
+  });
+  app.register(authRoutes, {
+    attemptLimit: {
+      max: positiveIntegerFromEnv("AUTH_RATE_LIMIT_MAX", 5),
+      identifierMax: positiveIntegerFromEnv("AUTH_IDENTIFIER_RATE_LIMIT_MAX", 20),
+      timeWindow: positiveIntegerFromEnv("AUTH_RATE_LIMIT_WINDOW_MS", 15 * 60_000),
+    },
+  });
   app.register(productRoutes);
   app.register(orderRoutes);
   app.register(buddyRoutes);
@@ -116,7 +144,9 @@ export const buildApp = async ({ mongoUri, connectDatabase = true } = {}) => {
   });
 
   await app.ready();
-  attachRealtimeHandlers(app.io);
+  attachRealtimeHandlers(app.io, {
+    locationMinIntervalMs: positiveIntegerFromEnv("DELIVERY_LOCATION_MIN_INTERVAL_MS", 5_000),
+  });
   setAdminRealtimeServer(app.io);
 
   if (!isProductionEnvironment) {

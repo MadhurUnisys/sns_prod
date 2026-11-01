@@ -10,8 +10,9 @@ process.env.ACCESS_TOKEN_SECRET = "test-access-secret-that-is-at-least-32-charac
 process.env.REFRESH_TOKEN_SECRET = "test-refresh-secret-that-is-at-least-32-characters";
 process.env.ADMIN_SESSION_SECRET = "test-admin-session-secret-that-is-at-least-32-characters";
 process.env.CUSTOMER_DEV_LOGIN = "true";
+process.env.RATE_LIMIT_MAX = "10000";
 
-const { buildApp } = await import("../app.js");
+const { buildApp, createLoggerOptions } = await import("../app.js");
 const { Admin, Buddy, Customer } = await import("../src/models/user.js");
 const Category = (await import("../src/models/category.js")).default;
 const Counter = (await import("../src/models/counter.js")).default;
@@ -38,6 +39,8 @@ const deliveryLocation = { ...point, address: "Test address" };
 let mongoServer;
 let app;
 let fixture;
+const logLines = [];
+const logStream = { write: (line) => { logLines.push(line); } };
 
 const createOrder = (customer, payload = {}) =>
   app.inject({
@@ -54,7 +57,7 @@ const createOrder = (customer, payload = {}) =>
 
 test.before(async () => {
   mongoServer = await MongoMemoryServer.create();
-  app = await buildApp({ mongoUri: mongoServer.getUri() });
+  app = await buildApp({ mongoUri: mongoServer.getUri(), logStream });
 });
 
 test.beforeEach(async () => {
@@ -963,4 +966,131 @@ test("order indexes exist", async () => {
   const idempotency = indexes.find((index) => index.name === "customer_1_idempotencyKey_1");
   assert.equal(idempotency.unique, true);
   assert.deepEqual(idempotency.partialFilterExpression, { idempotencyKey: { $type: "string" } });
+});
+
+const postLogin = (url, payload, remoteAddress = "127.0.0.1") =>
+  app.inject({ method: "POST", url, payload, remoteAddress });
+
+test("repeated failed logins are rate limited", async () => {
+  const wrong = { email: "far@example.com", password: "wrong-password" };
+  for (let attempt = 1; attempt <= 5; attempt += 1) {
+    assert.equal((await postLogin("/auth/buddy/login", wrong)).statusCode, 401, `attempt ${attempt}`);
+  }
+  const blocked = await postLogin("/auth/buddy/login", wrong);
+  assert.equal(blocked.statusCode, 429);
+  assert.ok(Number(blocked.headers["retry-after"]) > 0);
+  const correct = { email: "far@example.com", password: "buddy-password-123" };
+  assert.equal((await postLogin("/auth/buddy/login", correct)).statusCode, 429);
+  assert.equal((await postLogin("/auth/login-delivery-partner", correct)).statusCode, 429);
+
+  const otherAccount = { email: "near@example.com", password: "buddy-password-123" };
+  assert.equal((await postLogin("/auth/buddy/login", otherAccount)).statusCode, 200);
+  assert.equal((await postLogin("/auth/buddy/login", correct, "10.0.0.2")).statusCode, 200);
+
+  const unknown = { email: "nobody@example.com", password: "wrong-password" };
+  let unknownResponse;
+  for (let attempt = 1; attempt <= 6; attempt += 1) unknownResponse = await postLogin("/auth/buddy/login", unknown);
+  assert.equal(unknownResponse.statusCode, 429);
+  assert.deepEqual(unknownResponse.json(), blocked.json());
+
+  let adminResponse;
+  for (let attempt = 1; attempt <= 6; attempt += 1) {
+    adminResponse = await postLogin("/auth/admin/login", { email: "intruder@example.com", password: "wrong-password" });
+  }
+  assert.equal(adminResponse.statusCode, 429);
+  let refreshResponse;
+  for (let attempt = 1; attempt <= 6; attempt += 1) {
+    refreshResponse = await postLogin("/auth/refresh", { refreshToken: "not-a-real-refresh-token" });
+  }
+  assert.equal(refreshResponse.statusCode, 429);
+  assert.deepEqual(refreshResponse.json(), blocked.json());
+});
+
+test("one account attacked from many IPs is rate limited", async () => {
+  const attempt = { email: "target@example.com", password: "wrong-password" };
+  for (let index = 1; index <= 20; index += 1) {
+    assert.equal((await postLogin("/auth/buddy/login", attempt, `10.1.0.${index}`)).statusCode, 401, `ip ${index}`);
+  }
+  const blocked = await postLogin("/auth/buddy/login", attempt, "10.1.0.21");
+  assert.equal(blocked.statusCode, 429);
+  assert.ok(Number(blocked.headers["retry-after"]) > 0);
+  assert.equal(blocked.json().message, "Too many sign-in attempts. Please try again later.");
+});
+
+test("rate limiter does not block normal traffic", async () => {
+  for (let index = 1; index <= 10; index += 1) {
+    const response = await app.inject({ method: "GET", url: "/products" });
+    assert.equal(response.statusCode, 200);
+    assert.equal(response.headers["x-ratelimit-limit"], "10000");
+  }
+});
+
+test("production logging is enabled with credential redaction", () => {
+  const production = createLoggerOptions({ production: true });
+  assert.equal(production.level, process.env.LOG_LEVEL || "info");
+  assert.equal(createLoggerOptions({ production: false }).level, process.env.LOG_LEVEL || "debug");
+  for (const path of ["req.headers.authorization", "req.headers.cookie", "req.body.password", "req.body.refreshToken"]) {
+    assert.ok(production.redact.includes(path), `missing redaction ${path}`);
+  }
+});
+
+test("logs do not leak credentials", async () => {
+  logLines.length = 0;
+  const password = "admin-password-123";
+  const login = await postLogin("/auth/admin/login", { email: "admin@example.com", password });
+  assert.equal(login.statusCode, 200);
+  const { accessToken, refreshToken } = login.json();
+  const me = await app.inject({ method: "GET", url: "/auth/me", headers: { authorization: `Bearer ${accessToken}`, cookie: "buddyyaa-admin=session-secret" } });
+  assert.equal(me.statusCode, 200);
+  assert.equal((await postLogin("/auth/refresh", { refreshToken })).statusCode, 200);
+  app.log.info({
+    req: {
+      headers: { authorization: `Bearer ${accessToken}`, cookie: "buddyyaa-admin=session-secret" },
+      body: { password, refreshToken },
+    },
+  }, "credential redaction probe");
+
+  const output = logLines.join("");
+  assert.match(output, /\/auth\/admin\/login/);
+  const probe = JSON.parse(logLines.find((line) => line.includes("credential redaction probe")));
+  assert.equal(probe.req.headers?.authorization, undefined);
+  assert.equal(probe.req.body?.password, undefined);
+  for (const secret of [password, accessToken, refreshToken, "session-secret"]) {
+    assert.equal(output.includes(secret), false, "log output contains a credential");
+  }
+});
+
+test("Socket.IO delivery location pings are throttled per socket", async () => {
+  const created = await createOrder(fixture.customer);
+  const orderId = created.json().order._id;
+  assert.equal((await app.inject({
+    method: "POST",
+    url: "/orders/confirm",
+    headers: auth(fixture.nearBuddy),
+    payload: { orderId },
+  })).statusCode, 200);
+  const address = app.server.listening
+    ? `http://127.0.0.1:${app.server.address().port}`
+    : await app.listen({ host: "127.0.0.1", port: 0 });
+  const buddySocket = await new Promise((resolve, reject) => {
+    const socket = connectSocket(address, {
+      auth: { token: tokenFor(fixture.nearBuddy) },
+      transports: ["websocket"],
+      reconnection: false,
+    });
+    socket.once("connect", () => resolve(socket));
+    socket.once("connect_error", reject);
+  });
+  const ping = (latitude) => new Promise((resolve) =>
+    buddySocket.emit("delivery:location", { orderId, latitude, longitude: 77.6 }, resolve)
+  );
+  try {
+    assert.deepEqual(await ping(12.975), { persisted: true });
+    assert.deepEqual(await ping(12.976), { throttled: true });
+    assert.equal(buddySocket.connected, true);
+  } finally {
+    buddySocket.disconnect();
+  }
+  const saved = await Order.findById(orderId).lean();
+  assert.equal(saved.deliveryPersonLocation.latitude, 12.975);
 });

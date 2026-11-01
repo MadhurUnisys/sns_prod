@@ -11,7 +11,7 @@ const mayJoinOrderRoom = (user, order) =>
   (user.role === "Customer" && String(order.customer) === user.id) ||
   (user.role === "Buddy" && String(order.buddy) === user.id);
 
-export const attachRealtimeHandlers = (io) => {
+export const attachRealtimeHandlers = (io, { locationMinIntervalMs = 5_000 } = {}) => {
   io.use(async (socket, next) => {
     const token =
       socket.handshake.auth?.token ||
@@ -46,6 +46,7 @@ export const attachRealtimeHandlers = (io) => {
   io.on("connection", (socket) => {
     const user = socket.data.user;
     if (user.role === "Buddy") socket.join(`buddy:${user.id}`);
+    let lastLocationAcceptedAt = Number.NEGATIVE_INFINITY;
 
     socket.on("order:join", async (payload = {}, acknowledge = () => {}) => {
       if (!payload.orderId) return acknowledge({ error: "orderId is required." });
@@ -70,6 +71,9 @@ export const attachRealtimeHandlers = (io) => {
       if (!isValidCoordinates(latitude, longitude) || !payload.orderId) {
         return acknowledge({ error: "Valid orderId and coordinates are required." });
       }
+      const now = Date.now();
+      if (now - lastLocationAcceptedAt < locationMinIntervalMs) return acknowledge({ throttled: true });
+      lastLocationAcceptedAt = now;
       try {
         const order = await Order.findOneAndUpdate(
           {
