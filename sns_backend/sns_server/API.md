@@ -32,13 +32,13 @@ Customer phone login is not OTP-backed and is not enabled in production. Admin a
 Rejected requests get `429` with a `Retry-After` header (seconds) and `{ "message": "..." }`. The limits apply per server process and are kept in memory, so they are not shared between instances and reset on restart.
 
 - **Every API route** (all routes in this document except `/`, `/health`, `/ready` and AdminJS): 100 requests per minute per client IP. Responses carry `x-ratelimit-limit`, `x-ratelimit-remaining` and `x-ratelimit-reset`.
-- **Sign-in and refresh** (`/auth/login`, `/auth/customer/login`, `/auth/buddy/login`, `/auth/login-delivery-partner`, `/auth/admin/login`, `/auth/refresh`): these routes share one attempt budget, on top of the global limit. Successful attempts count too.
+- **Sign-in and refresh** (`/auth/login`, `/auth/customer/login`, `/auth/buddy/login`, `/auth/login-delivery-partner`, `/auth/admin/login`, `/auth/refresh`, and the AdminJS form `POST /admin/login`): these routes share one attempt budget. The API routes also count toward the global limit. Successful attempts count too.
   - 5 attempts per 15 minutes for each client IP + submitted identifier.
   - 20 attempts per 15 minutes for each identifier across all IPs.
   - The identifier is the submitted email, phone or refresh token.
   - The 429 message is the same whether or not the account exists. A real account can be locked for up to 15 minutes by attempts spread across several IPs.
 
-The client IP is the TCP peer address; `trustProxy` is not enabled. Behind a reverse proxy, every client would share the proxy's IP and therefore one budget.
+The client IP is the TCP peer address unless `TRUST_PROXY` is set. When it is, `X-Forwarded-For` is honoured only from the configured proxies; anyone else gets their own TCP address used. Behind a reverse proxy without `TRUST_PROXY`, every client shares the proxy's IP and therefore one budget.
 
 ## Catalogue
 

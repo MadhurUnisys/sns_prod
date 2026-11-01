@@ -22,7 +22,7 @@ const attemptIdentifier = (body = {}) => {
 
 // Fixed-window, in-process counters: per IP + identifier (no shared-NAT lockout) and
 // per identifier across all IPs (no distributed hammering of one account).
-const createAttemptLimiter = ({ max, identifierMax, timeWindow }) => {
+export const createAttemptLimiter = ({ max, identifierMax, timeWindow }) => {
   const windows = new Map();
   const hit = (key, limit, now) => {
     let entry = windows.get(key);
@@ -51,8 +51,8 @@ const createAttemptLimiter = ({ max, identifierMax, timeWindow }) => {
   };
 };
 
-export default async function authRoutes(fastify, { attemptLimit } = {}) {
-  const limited = { preHandler: [createAttemptLimiter(attemptLimit)] };
+export default async function authRoutes(fastify, { attemptLimiter }) {
+  const limited = { preHandler: [attemptLimiter] };
   fastify.post("/auth/login", limited, loginCustomer);
   fastify.post("/auth/customer/login", limited, loginCustomer);
   fastify.post("/auth/buddy/login", limited, loginBuddy);

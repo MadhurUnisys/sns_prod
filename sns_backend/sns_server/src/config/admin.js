@@ -234,7 +234,7 @@ const admin = new AdminJS({
   ],
 });
 
-export const registerAdminPanel = async (fastify) => {
+export const registerAdminPanel = async (fastify, { attemptLimiter } = {}) => {
   if (!ADMIN_SESSION_SECRET || ADMIN_SESSION_SECRET.length < 32) {
     throw new Error("ADMIN_SESSION_SECRET must be at least 32 characters.");
   }
@@ -280,7 +280,7 @@ export const registerAdminPanel = async (fastify) => {
     });
     return reply.type("text/html").send(page);
   });
-  fastify.post(loginPath, async (request, reply) => {
+  fastify.post(loginPath, { preHandler: attemptLimiter ? [attemptLimiter] : [] }, async (request, reply) => {
     const adminUser = await authenticateAdmin(
       request.body?.email,
       request.body?.password

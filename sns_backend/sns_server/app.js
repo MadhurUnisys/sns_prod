@@ -12,7 +12,7 @@ import {
   isProductionEnvironment,
 } from "./src/config/config.js";
 import { registerAdminPanel, setAdminRealtimeServer } from "./src/config/admin.js";
-import authRoutes from "./src/routes/auth.js";
+import authRoutes, { createAttemptLimiter } from "./src/routes/auth.js";
 import productRoutes from "./src/routes/products.js";
 import orderRoutes from "./src/routes/order.js";
 import buddyRoutes from "./src/routes/buddy.js";
@@ -26,6 +26,16 @@ const currentFile = fileURLToPath(import.meta.url);
 const positiveIntegerFromEnv = (name, fallback) => {
   const value = Number(process.env[name]);
   return Number.isSafeInteger(value) && value > 0 ? value : fallback;
+};
+
+// TRUST_PROXY: unset/"false" = use the TCP peer; "true" = trust any X-Forwarded-For (spoofable);
+// a hop count such as "1"; or a comma-separated list of proxy IPs/CIDRs.
+export const parseTrustProxy = (value = "") => {
+  const setting = value.trim();
+  if (!setting || setting === "false") return false;
+  if (setting === "true") return true;
+  if (/^\d+$/.test(setting)) return Number(setting);
+  return setting;
 };
 
 export const createLoggerOptions = ({ production = isProductionEnvironment, stream } = {}) => ({
@@ -47,7 +57,10 @@ export const buildApp = async ({ mongoUri, connectDatabase = true, logStream } =
     await recoverPendingOrderAssignments();
   }
 
-  const app = Fastify({ logger: createLoggerOptions({ stream: logStream }) });
+  const app = Fastify({
+    logger: createLoggerOptions({ stream: logStream }),
+    trustProxy: parseTrustProxy(process.env.TRUST_PROXY),
+  });
   app.decorateRequest("user", null);
 
   app.setErrorHandler((error, request, reply) => {
@@ -122,19 +135,18 @@ export const buildApp = async ({ mongoUri, connectDatabase = true, logStream } =
     });
   });
 
-  await registerAdminPanel(app);
+  const attemptLimiter = createAttemptLimiter({
+    max: positiveIntegerFromEnv("AUTH_RATE_LIMIT_MAX", 5),
+    identifierMax: positiveIntegerFromEnv("AUTH_IDENTIFIER_RATE_LIMIT_MAX", 20),
+    timeWindow: positiveIntegerFromEnv("AUTH_RATE_LIMIT_WINDOW_MS", 15 * 60_000),
+  });
+  await registerAdminPanel(app, { attemptLimiter });
   await app.register(rateLimit, {
     global: true,
     max: positiveIntegerFromEnv("RATE_LIMIT_MAX", 100),
     timeWindow: positiveIntegerFromEnv("RATE_LIMIT_WINDOW_MS", 60_000),
   });
-  app.register(authRoutes, {
-    attemptLimit: {
-      max: positiveIntegerFromEnv("AUTH_RATE_LIMIT_MAX", 5),
-      identifierMax: positiveIntegerFromEnv("AUTH_IDENTIFIER_RATE_LIMIT_MAX", 20),
-      timeWindow: positiveIntegerFromEnv("AUTH_RATE_LIMIT_WINDOW_MS", 15 * 60_000),
-    },
-  });
+  app.register(authRoutes, { attemptLimiter });
   app.register(productRoutes);
   app.register(orderRoutes);
   app.register(buddyRoutes);

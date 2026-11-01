@@ -11,6 +11,7 @@ process.env.REFRESH_TOKEN_SECRET = "test-refresh-secret-that-is-at-least-32-char
 process.env.ADMIN_SESSION_SECRET = "test-admin-session-secret-that-is-at-least-32-characters";
 process.env.CUSTOMER_DEV_LOGIN = "true";
 process.env.RATE_LIMIT_MAX = "10000";
+process.env.TRUST_PROXY = "127.0.0.1";
 
 const { buildApp, createLoggerOptions } = await import("../app.js");
 const { Admin, Buddy, Customer } = await import("../src/models/user.js");
@@ -1093,4 +1094,44 @@ test("Socket.IO delivery location pings are throttled per socket", async () => {
   }
   const saved = await Order.findById(orderId).lean();
   assert.equal(saved.deliveryPersonLocation.latitude, 12.975);
+});
+
+test("AdminJS panel login shares the sign-in attempt limit", async () => {
+  const panelLogin = (email, password) => app.inject({
+    method: "POST",
+    url: "/admin/login",
+    headers: { "content-type": "application/x-www-form-urlencoded" },
+    payload: new URLSearchParams({ email, password }).toString(),
+  });
+  for (let attempt = 1; attempt <= 5; attempt += 1) {
+    const response = await panelLogin("panel-intruder@example.com", "wrong-password");
+    assert.equal(response.statusCode, 200, `attempt ${attempt}`);
+    assert.match(response.headers["content-type"], /text\/html/);
+  }
+  const blocked = await panelLogin("panel-intruder@example.com", "wrong-password");
+  assert.equal(blocked.statusCode, 429);
+  assert.ok(Number(blocked.headers["retry-after"]) > 0);
+  assert.equal(blocked.json().message, "Too many sign-in attempts. Please try again later.");
+  const viaApi = await postLogin("/auth/admin/login", { email: "panel-intruder@example.com", password: "wrong-password" });
+  assert.equal(viaApi.statusCode, 429);
+});
+
+test("sign-in limits key on the forwarded client IP only behind a trusted proxy", async () => {
+  const viaProxy = (email, clientIp, remoteAddress = "127.0.0.1") => app.inject({
+    method: "POST",
+    url: "/auth/buddy/login",
+    remoteAddress,
+    headers: { "x-forwarded-for": clientIp },
+    payload: { email, password: "wrong-password" },
+  });
+  for (let attempt = 1; attempt <= 5; attempt += 1) {
+    assert.equal((await viaProxy("proxied@example.com", "203.0.113.10")).statusCode, 401, `attempt ${attempt}`);
+  }
+  assert.equal((await viaProxy("proxied@example.com", "203.0.113.10")).statusCode, 429);
+  assert.equal((await viaProxy("proxied@example.com", "203.0.113.11")).statusCode, 401);
+
+  for (let attempt = 1; attempt <= 5; attempt += 1) {
+    assert.equal((await viaProxy("spoofer@example.com", `198.51.100.${attempt}`, "10.2.0.1")).statusCode, 401, `attempt ${attempt}`);
+  }
+  assert.equal((await viaProxy("spoofer@example.com", "198.51.100.99", "10.2.0.1")).statusCode, 429);
 });

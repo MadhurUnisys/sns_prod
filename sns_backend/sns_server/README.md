@@ -48,10 +48,11 @@ All settings below are optional environment variables. `.env.example` does not l
 | `AUTH_IDENTIFIER_RATE_LIMIT_MAX` | `20` | Sign-in/refresh attempts per identifier across all IPs per auth window |
 | `AUTH_RATE_LIMIT_WINDOW_MS` | `900000` (15 min) | Auth attempt window |
 | `DELIVERY_LOCATION_MIN_INTERVAL_MS` | `5000` | Minimum gap between accepted `delivery:location` socket pings per socket |
+| `TRUST_PROXY` | unset (off) | Proxies whose `X-Forwarded-For` is trusted for the client IP: a comma-separated IP/CIDR list (preferred), a hop count such as `1`, or `true` (trusts any sender and is spoofable) |
 
 Logging is on in every environment and logs one line per request (method, URL, status, timing). The logger redacts `authorization` and `cookie` request headers and `password` and `refreshToken` body fields. Fastify's default request serializer does not log headers or bodies at all, so this redaction only protects against a future serializer change. It does not protect values logged under other keys. There is still no error tracking service.
 
-Rate-limit counters live in memory in each process. They are not shared across instances and reset on restart. The client IP is the TCP peer address (`trustProxy` is off), so behind a reverse proxy every client shares one budget. Enable and configure `trustProxy` before deploying behind one. `/admin/login` (AdminJS) is not rate limited.
+Rate-limit counters live in memory in each process. They are not shared across instances and reset on restart. Without `TRUST_PROXY` the client IP is the TCP peer address, so behind a reverse proxy every client shares one budget. Set `TRUST_PROXY` to the proxy's address (or its hop count) before deploying behind one. The AdminJS form login `POST /admin/login` shares the API sign-in attempt budget. A blocked attempt returns a JSON 429, not the login page.
 
 `GET /orders` returns at most 25 orders per page (`?limit=` up to 100). Pass the returned `pageInfo.nextCursor` as `?cursor=` for the next page. See [API.md](./API.md) for details.
 
