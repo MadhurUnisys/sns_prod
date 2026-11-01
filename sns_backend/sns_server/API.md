@@ -67,7 +67,7 @@ Buddies may update only `availableQuantity` for their own existing active invent
 | Method | Path | Authentication | Purpose |
 |---|---|---|---|
 | POST | `/orders/create` | Customer | Create one UFD or NORMAL order; customer ID comes from token |
-| GET | `/orders` | Customer, Buddy, Admin | List own customer orders, assigned Buddy orders, or all orders for Admin; optional valid `?status=` |
+| GET | `/orders` | Customer, Buddy, Admin | List own customer orders, assigned Buddy orders, or all orders for Admin, newest first and paginated; optional valid `?status=`, `?limit=`, `?cursor=` |
 | GET | `/orders/:id` | Customer, assigned Buddy, Admin | Fetch an authorized order |
 | GET | `/orders/:id/tracking` | Customer, assigned Buddy, Admin | Fetch destination, pickup, status, and delivery coordinates |
 | POST | `/orders/confirm` | Assigned Buddy or Admin | Accept a pending assigned order |
@@ -96,6 +96,20 @@ Create-order body shape:
 For NORMAL delivery omit `selectedBuddyId`; the server chooses the nearest active Buddy able to fulfill every requested quantity. The server ignores client prices and snapshots catalogue prices. UFD requires the selected Buddy ID and never switches to another Buddy at checkout. Coordinates must be numeric values within latitude/longitude ranges.
 
 Statuses: `pending → confirmed → preparing → arriving → out_for_delivery → delivered`; cancellation is available before dispatch according to server transition rules. Customers can cancel only a pending order. Stock is reserved at order creation, restored once for cancellation, and consumed once on delivery. Order IDs are sequential `ORDR00001` style IDs.
+
+`GET /orders` is cursor-paginated, newest first:
+
+- `limit`: page size, an integer from 1 to 100. Default 25. Any other value returns 400.
+- `cursor`: the `nextCursor` value from the previous page, an ISO timestamp. The page holds orders created strictly before it. An unparseable cursor is ignored and the first page is returned.
+
+```json
+{
+  "orders": [{ "_id": "...", "orderId": "ORDR00031", "status": "pending", "buddy": { "_id": "...", "name": "..." }, "allowedStatuses": ["confirmed", "cancelled"] }],
+  "pageInfo": { "hasMore": true, "nextCursor": "2026-01-01T00:00:05.000Z" }
+}
+```
+
+`nextCursor` is `null` when `hasMore` is false. List rows populate only the Buddy's `name`. `customer` and `items[].product` are returned as IDs, and each item keeps its snapshotted `name`, `price` and `quantity`. Use `GET /orders/:id` for the fully populated order. The cursor is a timestamp only, so if two orders share the same `createdAt` millisecond across a page boundary, the second can be skipped.
 
 ## AdminJS
 

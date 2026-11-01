@@ -56,12 +56,16 @@ export function BuddyDashboard() {
   const [inventorySaving, setInventorySaving] = useState<string | null>(null)
   const [inventoryError, setInventoryError] = useState('')
   const [inventoryNotice, setInventoryNotice] = useState('')
+  const [nextCursor, setNextCursor] = useState<string | null>(null)
+  const [loadingMore, setLoadingMore] = useState(false)
 
   const refresh = useCallback(async () => {
     setBusy(true)
     setError('')
     try {
-      setOrders(await api.orders())
+      const page = await api.orders()
+      setOrders(page.orders)
+      setNextCursor(page.nextCursor)
     } catch (reason) {
       setError(formatApiError(reason))
     } finally {
@@ -102,6 +106,21 @@ export function BuddyDashboard() {
   const inProgress = assignedOrders.filter((order) => !isDelivered(order.status) && !isCancelled(order.status) && !isAwaitingAcceptance(order.status))
   const visible = tab === 'available' ? available : tab === 'progress' ? inProgress : delivered
 
+  async function loadMore() {
+    if (!nextCursor || loadingMore) return
+    setLoadingMore(true)
+    setError('')
+    try {
+      const page = await api.orders(nextCursor)
+      setOrders((current) => [...current, ...page.orders])
+      setNextCursor(page.nextCursor)
+    } catch (reason) {
+      setError(formatApiError(reason))
+    } finally {
+      setLoadingMore(false)
+    }
+  }
+
   async function saveInventory(item: BuddyInventoryItem) {
     const quantity = Number(inventoryDrafts[item.id])
     if (!Number.isSafeInteger(quantity) || quantity < 0) {
@@ -138,6 +157,7 @@ export function BuddyDashboard() {
           {error && <div className="inline-error"><span>{error}</span><button className="button button--outline" onClick={() => void refresh()} type="button"><RefreshCw size={15} /> Retry</button></div>}
           {busy ? <div className="buddy-order-skeleton" /> : visible.length === 0 && !error ? <EmptyState icon={<CircleHelp size={24} />} title={tab === 'delivered' ? 'No completed deliveries yet' : tab === 'progress' ? 'Nothing in progress' : 'No orders waiting right now'} message="This list only includes orders returned for your authenticated Buddy account." /> :
             <div className="buddy-order-list">{visible.map((order) => <BuddyOrderRow key={order.id} order={order} />)}</div>}
+          {!busy && nextCursor && <div className="buddy-order-list"><button className="button button--outline button--wide" disabled={loadingMore} onClick={() => void loadMore()} type="button">{loadingMore ? 'Loading…' : 'Load more'}</button></div>}
         </div>
         <section className="buddy-orders-card buddy-inventory-card">
           <div className="buddy-orders-heading">

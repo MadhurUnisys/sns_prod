@@ -12,8 +12,14 @@ import type {
 const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL ?? '').replace(/\/+$/, '')
 const REQUEST_TIMEOUT_MS = 20_000
 const REFRESH_TOKEN_KEY = 'buddyyaa-refresh-token'
+const ORDER_PAGE_SIZE = 25
 let accessToken: string | null = null
 let refreshInFlight: Promise<boolean> | null = null
+
+export interface OrderPage {
+  orders: Order[]
+  nextCursor: string | null
+}
 
 export class ApiError extends Error {
   readonly status: number
@@ -416,9 +422,13 @@ export const api = {
     return order
   },
 
-  async orders() {
-    const body = await request<unknown>('/orders')
-    return normalizedList(body, normalizeOrder)
+  async orders(cursor?: string): Promise<OrderPage> {
+    const params = new URLSearchParams({ limit: String(ORDER_PAGE_SIZE) })
+    if (cursor) params.set('cursor', cursor)
+    const body = await request<unknown>(`/orders?${params}`)
+    const pageInfo = record(record(unwrap(body)).pageInfo)
+    const nextCursor = pageInfo.hasMore === true ? firstString(pageInfo.nextCursor) ?? null : null
+    return { orders: normalizedList(body, normalizeOrder), nextCursor }
   },
 
   async buddyInventory() {

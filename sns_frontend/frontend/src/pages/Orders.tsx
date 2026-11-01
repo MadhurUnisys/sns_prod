@@ -26,12 +26,16 @@ export function OrderHistory() {
   const [orders, setOrders] = useState<Order[]>([])
   const [busy, setBusy] = useState(true)
   const [error, setError] = useState('')
+  const [nextCursor, setNextCursor] = useState<string | null>(null)
+  const [loadingMore, setLoadingMore] = useState(false)
 
   const refresh = useCallback(async () => {
     setBusy(true)
     setError('')
     try {
-      setOrders(await api.orders())
+      const page = await api.orders()
+      setOrders(page.orders)
+      setNextCursor(page.nextCursor)
     } catch (reason) {
       setError(formatApiError(reason))
     } finally {
@@ -41,6 +45,20 @@ export function OrderHistory() {
   useEffect(() => {
     if (!loading && user && role === 'customer') void refresh()
   }, [loading, refresh, role, user])
+  async function loadMore() {
+    if (!nextCursor || loadingMore) return
+    setLoadingMore(true)
+    setError('')
+    try {
+      const page = await api.orders(nextCursor)
+      setOrders((current) => [...current, ...page.orders])
+      setNextCursor(page.nextCursor)
+    } catch (reason) {
+      setError(formatApiError(reason))
+    } finally {
+      setLoadingMore(false)
+    }
+  }
   if (loading) return <div className="page-loading" role="status">Loading your account…</div>
   if (!user || role !== 'customer') return <Navigate to="/login" replace />
 
@@ -50,7 +68,7 @@ export function OrderHistory() {
       {error && <div className="inline-error"><span>{error}</span><button className="button button--outline" onClick={() => void refresh()} type="button"><RefreshCw size={15} /> Try again</button></div>}
       {busy ? <OrderSkeletons /> : orders.length === 0 && !error
         ? <EmptyState icon={<ShoppingBag size={25} />} title="No orders just yet" message="When you place your first order, you’ll find its progress and details here." action={<Link to="/" className="button button--gold">Explore fresh picks <ArrowRight size={16} /></Link>} />
-        : <div className="orders-list">{orders.map((order) => <OrderCard key={order.id} order={order} />)}</div>}
+        : <div className="orders-list">{orders.map((order) => <OrderCard key={order.id} order={order} />)}{nextCursor && <button className="button button--outline" disabled={loadingMore} onClick={() => void loadMore()} type="button">{loadingMore ? 'Loading…' : 'Load more'}</button>}</div>}
     </main>
   )
 }

@@ -89,6 +89,9 @@ orderSchema.index(
     partialFilterExpression: { idempotencyKey: { $type: "string" } },
   }
 );
+orderSchema.index({ customer: 1, createdAt: -1 });
+orderSchema.index({ buddy: 1, createdAt: -1 });
+orderSchema.index({ status: 1, createdAt: -1 });
 
 async function getNextSequenceValue(sequenceName) {
   const sequenceDocument = await Counter.findOneAndUpdate(

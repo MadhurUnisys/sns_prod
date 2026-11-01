@@ -879,3 +879,88 @@ test("Buddies can update available stock only in their own active inventory", as
   });
   assert.equal(unauthenticated.statusCode, 401);
 });
+
+const seedOrders = async (count) => {
+  const base = Date.parse("2026-01-01T00:00:00.000Z");
+  const docs = Array.from({ length: count }, (_, index) => ({
+    _id: new mongoose.Types.ObjectId(),
+    orderId: `ORDR9${String(index).padStart(4, "0")}`,
+    customer: fixture.customer._id,
+    buddy: fixture.nearBuddy._id,
+    deliveryType: "NORMAL",
+    items: [{ product: fixture.milk._id, quantity: 1, price: 45, name: "Milk" }],
+    deliveryLocation,
+    status: "pending",
+    inventoryState: "reserved",
+    totalPrice: 45,
+    createdAt: new Date(base + index * 1000),
+    updatedAt: new Date(base + index * 1000),
+  }));
+  await Order.collection.insertMany(docs);
+  return docs;
+};
+const listOrders = (account, query = "") =>
+  app.inject({ method: "GET", url: `/orders${query}`, headers: auth(account) });
+
+test("order list is paginated and cursor-stable", async () => {
+  const seeded = await seedOrders(30);
+  const first = await listOrders(fixture.customer);
+  assert.equal(first.statusCode, 200);
+  assert.equal(first.json().orders.length, 25);
+  assert.equal(first.json().pageInfo.hasMore, true);
+  assert.equal(typeof first.json().pageInfo.nextCursor, "string");
+
+  const second = await listOrders(
+    fixture.customer,
+    `?cursor=${encodeURIComponent(first.json().pageInfo.nextCursor)}`
+  );
+  assert.equal(second.statusCode, 200);
+  assert.equal(second.json().orders.length, 5);
+  assert.equal(second.json().pageInfo.hasMore, false);
+  assert.equal(second.json().pageInfo.nextCursor, null);
+
+  const pagedIds = [...first.json().orders, ...second.json().orders].map((order) => order._id);
+  assert.equal(new Set(pagedIds).size, 30);
+  const newestFirst = [...seeded].reverse().map((order) => String(order._id));
+  assert.deepEqual(pagedIds, newestFirst);
+
+  for (const limit of ["101", "abc", "0", "-1", "1.5"]) {
+    assert.equal((await listOrders(fixture.customer, `?limit=${limit}`)).statusCode, 400, `limit=${limit}`);
+  }
+  const small = await listOrders(fixture.customer, "?limit=10");
+  assert.equal(small.json().orders.length, 10);
+  assert.equal(small.json().pageInfo.hasMore, true);
+  const garbage = await listOrders(fixture.customer, "?cursor=garbage");
+  assert.equal(garbage.statusCode, 200);
+  assert.equal(garbage.json().orders.length, 25);
+});
+
+test("order list populates only list fields while order detail stays fully populated", async () => {
+  const created = await createOrder(fixture.customer);
+  const orderId = created.json().order._id;
+  const list = await listOrders(fixture.customer);
+  const [row] = list.json().orders;
+  assert.equal(row._id, orderId);
+  assert.equal(row.customer, String(fixture.customer._id));
+  assert.equal(row.items[0].product, String(fixture.milk._id));
+  assert.equal(row.items[0].name, "Milk");
+  assert.deepEqual(Object.keys(row.buddy).sort(), ["_id", "name"]);
+  assert.deepEqual(row.allowedStatuses, ["confirmed", "cancelled"]);
+
+  const detail = await app.inject({ method: "GET", url: `/orders/${orderId}`, headers: auth(fixture.customer) });
+  assert.equal(detail.json().order.customer.name, "Jane Customer");
+  assert.equal(detail.json().order.items[0].product.name, "Milk");
+  assert.ok(detail.json().order.buddy.location);
+});
+
+test("order indexes exist", async () => {
+  await Order.init();
+  const indexes = await Order.collection.indexes();
+  const names = indexes.map((index) => index.name);
+  for (const name of ["customer_1_createdAt_-1", "buddy_1_createdAt_-1", "status_1_createdAt_-1"]) {
+    assert.ok(names.includes(name), `missing index ${name}`);
+  }
+  const idempotency = indexes.find((index) => index.name === "customer_1_idempotencyKey_1");
+  assert.equal(idempotency.unique, true);
+  assert.deepEqual(idempotency.partialFilterExpression, { idempotencyKey: { $type: "string" } });
+});

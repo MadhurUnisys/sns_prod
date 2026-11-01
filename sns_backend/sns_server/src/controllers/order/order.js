@@ -15,6 +15,8 @@ import { assignOrderToBuddy } from "../../services/order-assignment.js";
 import { OrderLifecycleError, transitionOrder } from "../../services/order-lifecycle.js";
 
 const TRACKABLE_STATUSES = ["confirmed", "preparing", "arriving", "out_for_delivery"];
+const DEFAULT_ORDER_PAGE_SIZE = 25;
+const MAX_ORDER_PAGE_SIZE = 100;
 const STATUS_TRANSITIONS = {
   pending: ["confirmed", "cancelled"],
   confirmed: ["preparing", "cancelled"],
@@ -284,11 +286,32 @@ export const getOrders = async (request, reply) => {
     }
     filter.status = request.query.status;
   }
-  const orders = await populatedOrder(Order.find(filter).sort({ createdAt: -1 })).lean();
-  return reply.send({ orders: orders.map((order) => ({
-    ...order,
-    allowedStatuses: STATUS_TRANSITIONS[order.status] ?? [],
-  })) });
+  let limit = DEFAULT_ORDER_PAGE_SIZE;
+  if (request.query.limit !== undefined) {
+    limit = /^\d+$/.test(String(request.query.limit)) ? Number(request.query.limit) : Number.NaN;
+    if (!Number.isSafeInteger(limit) || limit < 1 || limit > MAX_ORDER_PAGE_SIZE) {
+      return reply.code(400).send({ message: `limit must be an integer from 1 to ${MAX_ORDER_PAGE_SIZE}.` });
+    }
+  }
+  const cursor = typeof request.query.cursor === "string" ? new Date(request.query.cursor) : null;
+  if (cursor && Number.isFinite(cursor.getTime())) filter.createdAt = { $lt: cursor };
+  const page = await Order.find(filter)
+    .sort({ createdAt: -1 })
+    .limit(limit + 1)
+    .populate("buddy", "name")
+    .lean();
+  const hasMore = page.length > limit;
+  const orders = hasMore ? page.slice(0, limit) : page;
+  return reply.send({
+    orders: orders.map((order) => ({
+      ...order,
+      allowedStatuses: STATUS_TRANSITIONS[order.status] ?? [],
+    })),
+    pageInfo: {
+      hasMore,
+      nextCursor: hasMore ? orders.at(-1).createdAt.toISOString() : null,
+    },
+  });
 };
 
 async function findAuthorizedOrder(request, orderId) {
