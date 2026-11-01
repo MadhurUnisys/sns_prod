@@ -1,0 +1,12 @@
+{
+  "name": "buddyyaa",
+  "private": true,
+  "type": "module",
+  "description": "Buddyyaa root runner: local demo and both test suites. See DEMO.md.",
+  "scripts": {
+    "dev": "node scripts/dev.mjs",
+    "demo:seed": "node sns_backend/sns_server/scripts/seed-demo.js",
+    "demo:reset": "node sns_backend/sns_server/scripts/seed-demo.js --reset",
+    "test": "npm --prefix sns_backend/sns_server test && npm --prefix sns_frontend/frontend test"
+  }
+}
