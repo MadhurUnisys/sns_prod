@@ -13,7 +13,18 @@ export const ADMIN_SESSION_SECRET =
   process.env.ADMIN_SESSION_SECRET || (isProduction ? "" : `${developmentSecret}-admin-session`);
 export const isProductionEnvironment = isProduction;
 
+// Read per order so a deploy can change the rate; each order snapshots the rate it was created with.
+export const getPlatformTakeRatePercent = () => {
+  const setting = process.env.PLATFORM_TAKE_RATE_PERCENT?.trim();
+  const value = setting ? Number(setting) : 12;
+  if (!Number.isFinite(value) || value < 0 || value > 100) {
+    throw new Error("PLATFORM_TAKE_RATE_PERCENT must be a number from 0 to 100.");
+  }
+  return value;
+};
+
 export const validateRuntimeConfig = () => {
+  getPlatformTakeRatePercent();
   if (!Number.isInteger(PORT) || PORT < 1 || PORT > 65535) {
     throw new Error("PORT must be an integer between 1 and 65535.");
   }

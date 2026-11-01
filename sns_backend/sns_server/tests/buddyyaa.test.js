@@ -1135,3 +1135,89 @@ test("sign-in limits key on the forwarded client IP only behind a trusted proxy"
   }
   assert.equal((await viaProxy("spoofer@example.com", "198.51.100.99", "10.2.0.1")).statusCode, 429);
 });
+
+const commissionOf = async (orderId) =>
+  Order.findById(orderId).select("+takeRatePercent +commissionAmount").lean();
+const leaksCommission = (body) => /takeRatePercent|commissionAmount/.test(JSON.stringify(body));
+
+test("commission is snapshotted at checkout and shown to Admins only", async () => {
+  const created = await createOrder(fixture.customer);
+  assert.equal(created.statusCode, 201);
+  const orderId = created.json().order._id;
+  const stored = await commissionOf(orderId);
+  assert.equal(stored.totalPrice, 45);
+  assert.equal(stored.takeRatePercent, 12);
+  assert.equal(stored.commissionAmount, 5.4);
+
+  assert.equal(leaksCommission(created.json()), false, "checkout response");
+  for (const account of [fixture.customer, fixture.nearBuddy]) {
+    for (const url of ["/orders", `/orders/${orderId}`, `/orders/${orderId}/tracking`]) {
+      const response = await app.inject({ method: "GET", url, headers: auth(account) });
+      assert.equal(response.statusCode, 200, `${account.role} ${url}`);
+      assert.equal(leaksCommission(response.json()), false, `${account.role} ${url}`);
+    }
+  }
+  const accepted = await app.inject({ method: "POST", url: "/orders/confirm", headers: auth(fixture.nearBuddy), payload: { orderId } });
+  assert.equal(leaksCommission(accepted.json()), false, "confirm response");
+
+  const adminList = await app.inject({ method: "GET", url: "/orders", headers: auth(fixture.admin) });
+  const row = adminList.json().orders.find((order) => order._id === orderId);
+  assert.equal(row.takeRatePercent, 12);
+  assert.equal(row.commissionAmount, 5.4);
+});
+
+test("commission survives admin reassignment unchanged", async () => {
+  const created = await createOrder(fixture.customer);
+  const orderId = created.json().order._id;
+  const before = await commissionOf(orderId);
+  const reassigned = await app.inject({
+    method: "PATCH",
+    url: `/api/admin/orders/${orderId}/assign-buddy`,
+    headers: auth(fixture.admin),
+    payload: { buddyId: fixture.farBuddy._id },
+  });
+  assert.equal(reassigned.statusCode, 200);
+  const after = await commissionOf(orderId);
+  assert.equal(String(after.buddy), String(fixture.farBuddy._id));
+  assert.equal(after.takeRatePercent, before.takeRatePercent);
+  assert.equal(after.commissionAmount, before.commissionAmount);
+});
+
+test("a take-rate change does not alter existing orders", async () => {
+  const first = await createOrder(fixture.customer);
+  process.env.PLATFORM_TAKE_RATE_PERCENT = "15";
+  try {
+    const second = await createOrder(fixture.otherCustomer);
+    assert.equal(second.statusCode, 201);
+    const [old, current] = await Promise.all([
+      commissionOf(first.json().order._id),
+      commissionOf(second.json().order._id),
+    ]);
+    assert.deepEqual([old.takeRatePercent, old.commissionAmount], [12, 5.4]);
+    assert.deepEqual([current.takeRatePercent, current.commissionAmount], [15, 6.75]);
+  } finally {
+    delete process.env.PLATFORM_TAKE_RATE_PERCENT;
+  }
+});
+
+test("AdminJS order list and detail show the commission", async () => {
+  const created = await createOrder(fixture.customer);
+  const orderId = created.json().order._id;
+  const panelLogin = await app.inject({
+    method: "POST",
+    url: "/admin/login",
+    remoteAddress: "10.9.0.1",
+    headers: { "content-type": "application/x-www-form-urlencoded" },
+    payload: new URLSearchParams({ email: "admin@example.com", password: "admin-password-123" }).toString(),
+  });
+  assert.ok([302, 303].includes(panelLogin.statusCode));
+  const cookie = panelLogin.headers["set-cookie"].split(";")[0];
+  const list = await app.inject({ method: "GET", url: "/admin/api/resources/Order/actions/list", headers: { cookie } });
+  assert.equal(list.statusCode, 200);
+  const record = list.json().records.find((entry) => entry.id === orderId);
+  assert.equal(record.params.commissionAmount, 5.4);
+  assert.equal(record.params.takeRatePercent, 12);
+  const show = await app.inject({ method: "GET", url: `/admin/api/resources/Order/records/${orderId}/show`, headers: { cookie } });
+  assert.equal(show.statusCode, 200);
+  assert.equal(show.json().record.params.commissionAmount, 5.4);
+});

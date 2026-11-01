@@ -11,6 +11,7 @@ import {
   reserveInventoryForOrder,
   releaseInventoryReservation,
 } from "../../services/fulfillment.js";
+import { getPlatformTakeRatePercent } from "../../config/config.js";
 import { assignOrderToBuddy } from "../../services/order-assignment.js";
 import { OrderLifecycleError, transitionOrder } from "../../services/order-lifecycle.js";
 
@@ -166,6 +167,8 @@ export const createOrder = async (request, reply) => {
     });
     const totalPrice = snapshotItems.reduce((sum, item) => sum + item.price * item.quantity, 0);
     if (!Number.isFinite(totalPrice)) return reply.code(400).send({ message: "The order total is invalid." });
+    const takeRatePercent = getPlatformTakeRatePercent();
+    const commissionAmount = Math.round(totalPrice * takeRatePercent) / 100;
 
     let candidates;
     if (checkout.deliveryType === "UFD") {
@@ -207,6 +210,8 @@ export const createOrder = async (request, reply) => {
         idempotencyKey: checkout.idempotencyKey,
         idempotencyFingerprint: checkout.fingerprint,
         totalPrice,
+        takeRatePercent,
+        commissionAmount,
       });
     } catch (error) {
       if (error.code === 11000 && checkout.idempotencyKey) {
@@ -295,7 +300,9 @@ export const getOrders = async (request, reply) => {
   }
   const cursor = typeof request.query.cursor === "string" ? new Date(request.query.cursor) : null;
   if (cursor && Number.isFinite(cursor.getTime())) filter.createdAt = { $lt: cursor };
-  const page = await Order.find(filter)
+  const query = Order.find(filter);
+  if (request.user.role === "Admin") query.select("+takeRatePercent +commissionAmount");
+  const page = await query
     .sort({ createdAt: -1 })
     .limit(limit + 1)
     .populate("buddy", "name")

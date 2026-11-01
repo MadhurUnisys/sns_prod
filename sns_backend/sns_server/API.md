@@ -122,6 +122,8 @@ Statuses: `pending → confirmed → preparing → arriving → out_for_delivery
 }
 ```
 
+For Admins only, each row also carries `takeRatePercent` and `commissionAmount` (rupees, rounded to paise). These are the platform take rate and commission snapshotted when the order was created. They are never returned to customers or Buddies, and never included in Socket.IO payloads.
+
 `nextCursor` is `null` when `hasMore` is false. List rows populate only the Buddy's `name`. `customer` and `items[].product` are returned as IDs, and each item keeps its snapshotted `name`, `price` and `quantity`. Use `GET /orders/:id` for the fully populated order. The cursor is a timestamp only, so if two orders share the same `createdAt` millisecond across a page boundary, the second can be skipped.
 
 ## AdminJS

@@ -70,7 +70,7 @@ Use a separate browser window (or a private window) for the Buddy, so the custom
 7. **The vendor's side.** In the second window, sign in at http://localhost:5173/buddy/login as `khan@buddyyaa.test`. The order is under **Available**. Open it and tap **Accept this order**, then **Preparing**, then **Out For Delivery**.
 8. **Tracking.** On the customer window, open **My orders → Track order**; the status follows the Buddy's changes. On the Buddy's order page, **Start location sharing** sends the laptop's real browser location, so away from Sambhajinagar the dot appears wherever the laptop actually is.
 9. **Delivered.** The Buddy taps **Delivered**. In Khan's **Inventory** panel, Tomato has gone from 30 to 28: stock moved exactly once.
-10. **Admin view.** Open http://localhost:3000/admin with the admin login: Orders, Buddies and Buddy inventory are all there.
+10. **Admin view.** Open http://localhost:3000/admin with the admin login: Orders, Buddies and Buddy inventory are all there. Opening an order shows Buddyyaa's take rate (12% by default) and its commission, e.g. ₹14.64 on the ₹122 order. Customers and Buddies never see these figures.
 
 Run `npm run demo:reset` again before the next audience.
 
@@ -80,7 +80,7 @@ Run `npm run demo:reset` again before the next audience.
 - **No scheduled delivery slots.** Every order is "deliver now".
 - **No push, SMS or WhatsApp notifications.** Updates appear only while the page is open.
 - **No OTP sign-up or real customer login.** The phone login above is a development shortcut that is disabled in production.
-- **No commission or earnings records** for Buddyyaa or the vendors, and no payouts.
+- **No earnings reports, settlement or payouts.** Each order records Buddyyaa's commission, but nothing totals it, invoices it or pays vendors.
 - **No mobile app.** This is a web app in a laptop browser.
 - **No address search or map picker.** Locations are typed as latitude/longitude, or taken from the browser's GPS.
 - **Do not edit a product's discount live.** `PATCH /products/:id` with a `discountPrice` currently fails (known bug). Editing it through AdminJS has not been tested.

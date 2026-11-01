@@ -78,6 +78,9 @@ const orderSchema = new mongoose.Schema(
       state: { type: String, enum: ["requested", "new_reserved"] },
     },
     totalPrice: { type: Number, required: true, min: 0 },
+    // Platform take rate and commission, snapshotted at checkout. Admin-only: never select by default.
+    takeRatePercent: { type: Number, min: 0, max: 100, select: false },
+    commissionAmount: { type: Number, min: 0, select: false },
   },
   { timestamps: true }
 );

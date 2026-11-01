@@ -62,6 +62,18 @@ const adminSessionStore = {
 };
 
 const readOnly = { new: false, edit: false, delete: false };
+// Commission fields are select:false on Order, so load them explicitly for the records shown.
+const withCommission = async (records = []) => {
+  const rows = await Order.find({ _id: { $in: records.map((record) => record.id) } })
+    .select("takeRatePercent commissionAmount")
+    .lean();
+  const byId = new Map(rows.map((row) => [String(row._id), row]));
+  for (const record of records) {
+    const row = byId.get(String(record.id));
+    record.params.takeRatePercent = row?.takeRatePercent;
+    record.params.commissionAmount = row?.commissionAmount;
+  }
+};
 let realtimeServer;
 
 const admin = new AdminJS({
@@ -170,6 +182,8 @@ const admin = new AdminJS({
           new: false,
           edit: false,
           delete: false,
+          list: { after: async (response) => { await withCommission(response.records); return response; } },
+          show: { after: async (response) => { if (response.record) await withCommission([response.record]); return response; } },
           updateOperationalStatus: {
             actionType: "record",
             label: "Update order status",
